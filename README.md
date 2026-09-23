@@ -115,7 +115,8 @@ The HTTP download rechecks integrity. A trace shows CSV creation and prediction.
 
 Predictions are stored server-side under a forecast ID; summary/question endpoints
 accept that ID rather than client-authored predictions. In-memory stores retain
-64 forecasts, so a server restart/eviction requires generating the forecast again.
+64 forecasts, backed by checked local JSON (latest 256, up to seven days), so
+a restart/eviction can restore the forecast by ID.
 Use one worker for this local demo. No database, queues or distributed services.
 
 ## Data and assumptions
@@ -189,7 +190,7 @@ No JavaScript errors or paid OpenAI requests occurred.
 ## Remaining work
 
 - Verify as-issued archived weather access for the user-supplied turbine coordinates.
-- Implement February replay over all 28 daily origins and both turbines.
+- Supply verified archive evidence and run the implemented February replay over all 28 origins.
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
@@ -247,3 +248,26 @@ python -m scripts.smoke_model --models-dir artifacts/models
 Демонстрационная погода и исторический архив остаются отдельными режимами.
 Ветер на 10 м — приближение; модель обучена до февраля 2026, качество текущего
 прогноза ещё не оценено. Источник: https://open-meteo.com/ (CC BY 4.0).
+
+## Проверенная устойчивость демо
+
+- Погода кешируется на пять минут; видны источник, время получения и отметка кеша.
+  Кнопка «Обновить погоду» очищает кеш выбранной турбины и повторяет расчёт.
+- При переходе UTC-часа выполняется один безопасный повтор.
+- Прогнозы сохраняются локально с контрольной суммой: до 256 результатов на семь
+  дней. CSV и объяснение работают по прежнему ID после перезапуска.
+- Baseline удалён из пользовательских результатов, CSV и контекста объяснения.
+  Он остаётся только в диагностике моделей.
+- Февральский CLI и точные команды: [DEMO_CHECKLIST.md](DEMO_CHECKLIST.md).
+  Согласование веток: [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md).
+
+Проверено: **155 тестов**, сборка React, Chromium 390/1280 px с моками API
+(горизонты 24/48, CSV/PNG/SVG, обновление погоды, ошибки, запоздалые ответы).
+Отдельно настоящий Open-Meteo подтвердил повторное использование кеша и обход
+кеша по кнопке/API. После реального перезапуска проверены оба CSV и объяснение
+по сохранённому ID. Новых платных вызовов OpenAI не было.
+
+Replay на fixtures: 4 запуска / 192 строки. Проверка настоящего архива:
+0 из 56 запусков, поскольку отсутствует независимое свидетельство доступности
+исторических выпусков. CLI сохранил все блокеры в report.json и вернул код 2;
+полная февральская сдача ещё не готова.

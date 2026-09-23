@@ -55,7 +55,7 @@ Success includes `status=ok`, those request fields, `timezone`, `run_id`,
 }
 ```
 
-Each hour is `{valid_at,lead_hour,wind_speed_ms,temperature_c,power_norm,baseline_norm}`.
+Each hour is `{valid_at,lead_hour,wind_speed_ms,temperature_c,power_norm}`.
 Analysis contains `peak_power_norm`, `peak_at`, `min_power_norm`, `min_at`,
 `clipped_count`, and `warnings`. Output is normalized power, not MW/MWh.
 
@@ -68,8 +68,9 @@ Errors use HTTP 400/422/503/404/500 as appropriate and
 `{status:"error",code,message,trace:[]}`. Unexpected tool/program failures
 return `INTERNAL_ERROR` (HTTP 500) with a generic Russian message; malformed
 weather/CSV data remains `DATA_INVALID` (HTTP 422). Forecasts are held in a bounded in-memory
-store (64 results). Restart or eviction means the ID returns 404; regenerate the
-forecast. This is intentionally a single-worker local demo, not distributed storage.
+store (64 results) backed by atomic, checksummed JSON in artifacts/forecasts.
+Restart/eviction restores a validated record. Disk retention: newest 256 files,
+maximum seven days. Missing/expired/corrupt records return 404; regenerate. This is intentionally a single-worker local demo, not distributed storage.
 
 ## Weather seam — A owns `weather.py`
 
@@ -276,11 +277,11 @@ There is no synthetic fallback on provider failure.
 
 Live provenance is `live`, `availability_basis=live_http_retrieval`, and
 `retrieved_at=available_at` records actual retrieval. `initialized_at=null`: the
-provider run initialization is unknown, not fabricated. Live retrieval must occur
-within the current origin hour; archive retains its stricter as-issued chronology.
+provider run initialization is unknown, not fabricated. Live retrieval must be no more than five minutes old and not in the future;
+cache reuse across an hour boundary still requires full target coverage; archive retains its stricter as-issued chronology.
 Weather wind height is 10 m. It is used as a provider feature, not interpreted as
-the unknown turbine sensor/hub height. Model training remains frozen; baseline
-is the last training observation rather than a current persistence forecast.
+the unknown turbine sensor/hub height. Model training remains frozen. Baseline values are only for internal model
+evaluation and are absent from user-facing hours, CSV and explanation inputs.
 
 ## Provider-compatible power model
 
@@ -313,3 +314,23 @@ contains training feature ranges; out-of-range inference hours generate a warnin
 UI and explanations retain the explicit experimental-model limitation.
 This improves source compatibility, not proof of 24/48-hour forecast skill.
 The verified Single Runs manifest/digest/availability gate remains mandatory.
+
+## Weather cache and persistent forecasts
+
+Live HTTP responses use a bounded eight-entry cache with a 300-second TTL, keyed
+by turbine, coordinates, URL and provider parameters. Coverage and raw artifact
+integrity are rechecked on reuse. `weather_cache_hit` is a boolean in provenance;
+`retrieved_at` retains actual original retrieval time. Volatile live retrieval
+fields are excluded from numeric forecast identity; archive provenance is retained.
+A UTC-hour boundary before/during/after retrieval triggers one refreshed-origin
+retry. A second crossing returns structured WEATHER_UNAVAILABLE.
+
+`POST /api/weather/refresh` accepts `{"turbine_id":"T1"}` (or T2), clears that
+turbine's cache, and returns `{"status":"ok"}`. React then regenerates the
+forecast using the normal request/epoch flow.
+
+Completed API results are saved as version-1 JSON envelopes with a SHA-256 content
+digest. Downloads/explanations restore after memory eviction or restart, subject
+to disk retention. Inputs remain server-owned; corrupt JSON, wrong identity,
+invalid coverage or checksum mismatches are rejected. Legacy baseline fields
+are stripped before response/explanation. No database or distributed workers.

@@ -22,7 +22,6 @@ export interface ForecastHour {
   wind_speed_ms: number
   temperature_c: number
   power_norm: number
-  baseline_norm: number
 }
 
 export interface ModelInput {
@@ -41,7 +40,10 @@ export interface TraceStep {
 
 export interface WeatherProvenance {
   provenance_status: string
-  [key: string]: string | number | null
+  provider?: string
+  retrieved_at?: string | null
+  weather_cache_hit?: boolean
+  [key: string]: string | number | boolean | null | undefined
 }
 
 export interface ModelProvenance {

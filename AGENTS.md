@@ -83,7 +83,8 @@ Train through CLI, not in requests. Load only locally generated model artifacts.
 Keep HTTP errors structured. Never return provider exception details or keys.
 Clear stale result/analysis/question state when input changes. Reject client-supplied
 predictions in explanation requests; use server-stored forecast IDs. In-memory
-stores are bounded; a restart/eviction returns 404 and the client regenerates.
+stores are bounded; restart/eviction restores checked JSON from artifacts/forecasts.
+Disk retention is 256 files / seven days; missing/expired/corrupt records return 404.
 
 ## Development
 
@@ -135,3 +136,15 @@ Real-weather inference uses `open_meteo_ecmwf_ifs_10m` model profile; fixture us
 `measured`. Never silently fall back across profiles. Retrospective Historical
 Forecast training cache is not an archive attestation. Preserve CSV raw feature
 semantics and the explicit experimental/accuracy-unverified labels.
+
+## Demo resilience and handoff
+
+Live HTTP payloads are cached for five minutes (maximum eight entries). Show the
+original retrieved_at and weather_cache_hit; POST /api/weather/refresh clears the
+selected turbine before an explicit refresh. A UTC-hour crossing retries once,
+then fails clearly. Preserve archive chronology. No baseline in user forecasts,
+CSV or explanation inputs; evaluation baselines remain internal.
+
+Follow TEAM_WORKFLOW.md for branch integration and DEMO_CHECKLIST.md for browser
+checks and replay commands. scripts/replay writes a full forecast.csv only when
+all 56 verified archive runs succeed; never mark partial/fixture replay complete.

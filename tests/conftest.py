@@ -7,6 +7,14 @@ def offline_llm(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")
 
 
+@pytest.fixture(autouse=True)
+def isolated_live_weather_cache():
+    from weather import clear_live_weather_cache
+    clear_live_weather_cache()
+    yield
+    clear_live_weather_cache()
+
+
 @pytest.fixture
 def provider_model_factory():
     """A real fitted estimator, with synthetic training data and explicit domain."""

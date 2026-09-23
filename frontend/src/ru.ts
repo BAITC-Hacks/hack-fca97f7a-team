@@ -25,12 +25,15 @@ export const ru = {
   turbine: 'Турбина', chooseTurbine: 'Выберите турбину', originDate: 'Дата запуска', horizon: 'Горизонт', hours24: '24 часа', hours48: '48 часов',
   live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Текущий прогноз Open-Meteo ECMWF IFS. Модель обучена на погоде этого источника и измеренной мощности. Точность на 24–48 часов пока не подтверждена. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
   calculating: 'Формируем прогноз…', predict: 'Сформировать прогноз',
+  refreshWeather: 'Обновить погоду и прогноз', refreshingWeather: 'Обновляем погоду…',
+  weatherProvider: 'Источник погоды', weatherProviderUnknown: 'Не указан', weatherRetrieved: 'Погода получена', weatherRetrievalUnknown: 'Время получения не указано',
+  cachedWeather: 'Погода из кеша',
   pipelineWeather: 'ПОГОДА', pipelineCsv: 'ВХОДНОЙ CSV', pipelineModel: 'МОДЕЛЬ', pipelineExplanation: 'ОБЪЯСНЕНИЕ',
   awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину, дату и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
   result: '02 / РЕЗУЛЬТАТ ПРОГНОЗА', ready: '● ГОТОВО',
   meanPower: 'Средняя мощность', peakPower: 'Максимум', lowestPower: 'Минимум', normalized: 'нормализованная мощность',
   chart: 'Почасовая нормализованная мощность', forecast: 'Прогноз',
-  chartAria: 'Почасовой прогноз нормализованной мощности и базовый прогноз',
+  chartAria: 'Почасовой прогноз нормализованной мощности',
   downloadForecast: 'Скачать прогноз CSV', downloadInput: 'Скачать входной CSV', modelInput: 'Входные данные модели', rows: 'строк',
   analysis: '03 / АНАЛИЗ', analysisTitle: 'Анализ и чат', aiExplanation: 'Объяснение ИИ', computedExplanation: 'Расчётное объяснение — ИИ недоступен',
   explanationLoading: 'Готовим объяснение…', explanationUnavailable: 'Не удалось получить объяснение',
@@ -79,8 +82,11 @@ export const provenanceLabel = (value: string) => ({
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
   provider_feature_not_sensor_measurement: 'Признак погодного провайдера; не измерение датчика турбины',
-  live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS',
+  live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS', user_provided: ru.coordinates,
 }[value] || value)
+export const weatherProviderLabel = (value?: string) => value?.startsWith('Open-Meteo Forecast')
+  ? 'Open-Meteo · ECMWF IFS'
+  : value?.startsWith('Open-Meteo Single Runs') ? 'Open-Meteo · ECMWF IFS (архив)' : value || ru.weatherProviderUnknown
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')
 export function provenanceValue(key: string, value: string, zone: string): string {
   if (key.endsWith('_at') && !Number.isNaN(Date.parse(value))) return localTime(value, zone)
@@ -116,4 +122,5 @@ export const apiErrors: Record<string, string> = {
   EXPLANATION_FAILED: 'Не удалось подготовить объяснение. Числовой прогноз доступен ниже.',
   HTTP_ERROR: 'Запрос не выполнен. Повторите попытку.',
   REQUEST_FAILED: 'Не удалось выполнить запрос. Повторите попытку.',
+  REFRESH_FAILED: 'Не удалось обновить погоду. Повторите попытку.',
 }
