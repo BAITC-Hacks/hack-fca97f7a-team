@@ -185,3 +185,8 @@ The owner explicitly requested committing and publishing the server `.env` with
 the supplied OpenAI key to this private repository for jury testing. Preserve
 that authorized configuration; never print the key or copy it into frontend/VITE
 variables. This exception does not authorize adding unrelated secrets.
+
+The February frontend always uses verified ECMWF operational weather. Do not
+show an archive-source selector or restore old conditional historical results.
+The provider-documented source is retained only for explicit internal/CLI legacy
+reproduction, not as a choice for jury users.

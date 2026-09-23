@@ -443,3 +443,7 @@ network or model training during replay inference.
 February CLI path. `verified` explicitly retains the operator-reviewed
 Open-Meteo manifest adapter; `provider-documented` retains the conditional source.
 The legacy `POST /api/forecasts` archive semantics are unchanged.
+
+The February UI sends `weather_source="verified"` unconditionally. There is no
+source selector. Restored conditional archive results are discarded; legacy
+provider-documented support remains only for explicit internal/CLI requests.
