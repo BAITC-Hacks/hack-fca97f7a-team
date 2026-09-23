@@ -1,6 +1,10 @@
 import hashlib
+import pickle
 
+import numpy as np
+import pandas as pd
 import pytest
+from sklearn.ensemble import HistGradientBoostingRegressor
 
 from contracts import FIRST_ORIGIN, ForecastError, artifact_dir
 from model_input import COLUMNS, read_model_input, write_model_input
@@ -51,3 +55,27 @@ def test_csv_is_required_by_prediction(csv_input, monkeypatch):
     with pytest.raises(ForecastError, match="Cannot read"):
         predict_power_csv(fitted, path, turbine_id="T2", origin=FIRST_ORIGIN,
                           horizon_hours=48, expected_sha256=metadata["sha256"])
+
+
+def test_legacy_flat_artifact_remains_usable_through_csv(csv_input, monkeypatch, tmp_path):
+    from model import PowerModel, load_model, predict_power_csv
+    _, metadata, path = csv_input
+    legacy_root = tmp_path / "legacy"
+    models_dir = legacy_root / "models"
+    models_dir.mkdir(parents=True)
+    features = pd.DataFrame({"wind_speed_ms": np.linspace(2, 12, 30),
+                             "temperature_c": np.linspace(-5, 5, 30)})
+    estimator = HistGradientBoostingRegressor(max_iter=100, max_leaf_nodes=15, random_state=42)
+    estimator.fit(features, np.linspace(0, 1, 30))
+    legacy = PowerModel(estimator, {
+        "turbine_id": "T2", "model_id": "sha256:legacy", "features": ["wind_speed_ms", "temperature_c"],
+        "train_origin": FIRST_ORIGIN, "train_last_interval_start": "2026-01-31T17:00:00Z",
+        "baseline_norm": 0.3, "sklearn_version": __import__("sklearn").__version__,
+    })
+    (models_dir / "T2.pkl").write_bytes(pickle.dumps(legacy))
+    monkeypatch.setenv("ARTIFACT_DIR", str(legacy_root))
+    loaded = load_model("T2")
+    assert loaded.metadata["feature_names"] == ["wind_speed_ms", "temperature_c"]
+    predicted = predict_power_csv(loaded, path, turbine_id="T2", origin=FIRST_ORIGIN,
+                                  horizon_hours=48, expected_sha256=metadata["sha256"])
+    assert len(predicted) == 48 and np.isfinite(predicted).all()

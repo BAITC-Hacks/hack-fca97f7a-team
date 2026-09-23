@@ -97,8 +97,8 @@ the original Maps URL. Sites are available in both modes, while archive weather
 remains unavailable. The fixture weather is still synthetic. Coordinates are
 included in the existing forecast cache identity through the site metadata.
 
-To replace fixtures: implement archive retrieval behind this function, provide
-verified real sites via `load_sites`, and keep the bundle shape. Test malformed
+To replace fixtures: implement archive retrieval behind this function using the
+registered user-provided sites, and keep the bundle shape. Test malformed
 values, missing hours, wrong turbine and future publication times. Do not substitute
 actual historical weather for as-issued forecasts.
 
@@ -141,6 +141,12 @@ predict_power_csv(model, csv_path, *, turbine_id, origin,
 `PowerModel.metadata` retains turbine ID, model ID, feature list, training origin,
 last completed training interval and frozen persistence baseline. The agent
 requires matching turbine and a training cutoff no later than the first origin.
+Locally generated versioned model artifacts also record the source and canonical
+data hashes, feature order and units, fit parameters and environment versions.
+`load_model(turbine_id)` remains the public loader and checks the selected turbine;
+regenerate artifacts through `python -m scripts.train --mode fixture` after
+changing ingestion or features. See [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md)
+for measured-source audits and unconfirmed weather feature provenance.
 CSV inference returns one finite value per row in the same order. The agent clamps
 to [0,1] and reports how many values needed clamping.
 

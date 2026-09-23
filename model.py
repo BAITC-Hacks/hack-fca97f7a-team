@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import os
 import pickle
 from pathlib import Path
 import platform
@@ -15,13 +16,7 @@ import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, utc_time, artifact_dir as default_artifact_dir
-
-def validate_origin(origin):
-    value = utc_time(origin)
-    if value.minute or value.second or value.microsecond:
-        raise ForecastError("INVALID_INPUT", "Origin must align to a UTC hour")
-    return value
+from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, artifact_dir, utc_time
 
 
 _PARAMETERS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
@@ -31,12 +26,13 @@ _UNITS = {"wind_speed_ms": "m/s", "temperature_c": "degC"}
 
 
 @dataclass
-class PowerModel:
+class ModelBundle:
     estimator: HistGradientBoostingRegressor
     metadata: dict
 
 
-ModelBundle = PowerModel
+# Retain the name used by the current FastAPI model contract.
+PowerModel = ModelBundle
 
 
 def _iso(value: pd.Timestamp) -> str:
@@ -61,44 +57,46 @@ def _canonical_rows(frame: pd.DataFrame) -> bytes:
 
 def train_model(history: pd.DataFrame, origin: str, turbine_id: str) -> ModelBundle:
     """Fit one turbine using only hours completed by both cutoffs."""
-    if turbine_id not in {"T1", "T2"}:
-        raise ForecastError("INVALID_INPUT", "Unknown turbine ID")
-    requested_cutoff = validate_origin(origin)
-    frozen_cutoff = validate_origin(FIRST_ORIGIN)
+    if turbine_id not in SITE_IDS:
+        raise ForecastError("INVALID_INPUT", "Неизвестная турбина.")
+    requested_cutoff = utc_time(origin)
+    frozen_cutoff = utc_time(FIRST_ORIGIN)
+    if requested_cutoff.minute or requested_cutoff.second or requested_cutoff.microsecond:
+        raise ForecastError("INVALID_INPUT", "Время обучения должно начинаться ровно в начале часа UTC.")
     cutoff = pd.Timestamp(min(requested_cutoff, frozen_cutoff))
     required = {"turbine_id", "timestamp", *FEATURES, "power_norm"}
     if not isinstance(history, pd.DataFrame) or not required.issubset(history.columns):
-        raise ForecastError("DATA_INVALID", "Canonical history is missing required columns")
+        raise ForecastError("DATA_INVALID", "В истории нет обязательных столбцов.")
     selected = history.loc[history["turbine_id"] == turbine_id,
                            ["timestamp", *FEATURES, "power_norm"]].copy()
     if selected.empty:
-        raise ForecastError("DATA_INVALID", f"No history for {turbine_id}")
+        raise ForecastError("DATA_INVALID", f"Нет истории для {turbine_id}.")
     try:
         stamps = [pd.Timestamp(value) for value in selected["timestamp"]]
     except (ValueError, TypeError, OverflowError) as exc:
-        raise ForecastError("DATA_INVALID", "Invalid history timestamp") from exc
+        raise ForecastError("DATA_INVALID", "Некорректная временная метка в истории.") from exc
     if any(pd.isna(stamp) or stamp.tzinfo is None or stamp.utcoffset() is None
            for stamp in stamps):
-        raise ForecastError("DATA_INVALID", "History timestamps must be timezone-aware")
+        raise ForecastError("DATA_INVALID", "Временные метки истории должны содержать часовой пояс.")
     selected["timestamp"] = pd.DatetimeIndex([stamp.tz_convert("UTC") for stamp in stamps])
     if any(stamp.minute or stamp.second or stamp.microsecond or stamp.nanosecond
            for stamp in selected["timestamp"]):
-        raise ForecastError("DATA_INVALID", "History timestamps must start on exact UTC hours")
+        raise ForecastError("DATA_INVALID", "Временные метки истории должны начинаться ровно в начале часа UTC.")
     selected = selected.loc[selected["timestamp"] + pd.Timedelta(hours=1) <= cutoff]
     selected = selected.sort_values("timestamp", kind="stable").reset_index(drop=True)
     if len(selected) < 24:
-        raise ForecastError("DATA_INVALID", "Training needs at least 24 complete historical hours")
+        raise ForecastError("DATA_INVALID", "Для обучения требуется не менее 24 полных исторических часов.")
     if selected["timestamp"].duplicated().any():
-        raise ForecastError("DATA_INVALID", "Duplicate hourly timestamps")
+        raise ForecastError("DATA_INVALID", "В истории есть повторяющиеся часовые метки.")
     try:
         numeric = selected[[*FEATURES, "power_norm"]].apply(pd.to_numeric, errors="raise")
     except (ValueError, TypeError) as exc:
-        raise ForecastError("DATA_INVALID", "Nonnumeric training feature or label") from exc
+        raise ForecastError("DATA_INVALID", "Признак или целевое значение обучения не является числом.") from exc
     values = numeric.to_numpy(dtype=float)
     if not np.isfinite(values).all() or np.any(values[:, 0] < 0):
-        raise ForecastError("DATA_INVALID", "Training features or labels are invalid")
+        raise ForecastError("DATA_INVALID", "Признаки или целевые значения обучения некорректны.")
     if np.any((values[:, -1] < 0) | (values[:, -1] > 1)):
-        raise ForecastError("DATA_INVALID", "Normalized power must be in [0, 1]")
+        raise ForecastError("DATA_INVALID", "Нормализованная мощность должна быть в диапазоне [0, 1].")
     selected[[*FEATURES, "power_norm"]] = numeric
     canonical_sha = _digest(_canonical_rows(selected))
     identity = {
@@ -129,9 +127,12 @@ def train_model(history: pd.DataFrame, origin: str, turbine_id: str) -> ModelBun
         "target_unit": "normalized_fraction",
         "train_cutoff": _iso(cutoff),
         "train_origin": _iso(cutoff),
-        "features": list(FEATURES),
         "train_last_interval_start": _iso(last.timestamp),
         "training_rows": len(selected),
+        "features": list(FEATURES),
+        "params": _PARAMETERS.copy(),
+        "training_source": "supplied turbine measurements",
+        "sklearn_version": sklearn.__version__,
         "source_sha256": None,
         "canonical_sha256": canonical_sha,
         "artifact_sha256": None,
@@ -148,85 +149,88 @@ def train_model(history: pd.DataFrame, origin: str, turbine_id: str) -> ModelBun
     return ModelBundle(estimator, metadata)
 
 
-def _predict_raw(model: ModelBundle, weather_rows: list[dict]) -> np.ndarray:
+def _raw_predictions(model: ModelBundle, weather_rows: list[dict]) -> np.ndarray:
     if not isinstance(model, ModelBundle) or not isinstance(model.estimator, HistGradientBoostingRegressor):
-        raise ForecastError("MODEL_UNAVAILABLE", "Invalid model bundle")
-    if model.metadata.get("feature_names", model.metadata.get("features")) != list(FEATURES):
-        raise ForecastError("MODEL_UNAVAILABLE", "Model feature order mismatch")
+        raise ForecastError("MODEL_UNAVAILABLE", "Артефакт модели некорректен.")
+    if model.metadata.get("feature_names") != list(FEATURES):
+        raise ForecastError("MODEL_UNAVAILABLE", "Порядок признаков модели не совпадает с входом.")
     if not isinstance(weather_rows, list) or not weather_rows:
-        raise ForecastError("INVALID_INPUT", "Weather rows are required")
+        raise ForecastError("INVALID_INPUT", "Для прогноза необходимы строки погоды.")
     features = []
     for row in weather_rows:
         if not isinstance(row, dict) or any(name not in row for name in FEATURES):
-            raise ForecastError("DATA_INVALID", "Weather feature is missing")
+            raise ForecastError("DATA_INVALID", "В строке погоды отсутствует признак.")
         try:
             wind, temp = (float(row[name]) for name in FEATURES)
         except (TypeError, ValueError) as exc:
-            raise ForecastError("DATA_INVALID", "Weather feature is nonnumeric") from exc
+            raise ForecastError("DATA_INVALID", "Признак погоды не является числом.") from exc
         if not np.isfinite(wind) or not np.isfinite(temp) or wind < 0:
-            raise ForecastError("DATA_INVALID", "Weather feature is nonfinite or wind is negative")
+            raise ForecastError("DATA_INVALID", "Признак погоды не является конечным числом или скорость ветра отрицательна.")
         features.append((wind, temp))
+    input_features = (pd.DataFrame(features, columns=FEATURES)
+                      if hasattr(model.estimator, "feature_names_in_")
+                      else np.asarray(features, dtype=float))
     with threadpool_limits(limits=1):
-        raw = np.asarray(model.estimator.predict(np.asarray(features, dtype=float)), dtype=float)
+        raw = np.asarray(model.estimator.predict(input_features), dtype=float)
     if raw.shape != (len(features),) or not np.isfinite(raw).all():
-        raise ForecastError("DATA_INVALID", "Model produced invalid predictions")
+        raise ForecastError("DATA_INVALID", "Модель вернула некорректные значения прогноза.")
     return raw
 
 
 def predict_with_diagnostics(model: ModelBundle, weather_rows: list[dict]) -> tuple[list[float], int]:
-    raw = _predict_raw(model, weather_rows)
+    raw = _raw_predictions(model, weather_rows)
     clipped_count = int(np.count_nonzero((raw < 0) | (raw > 1)))
     return np.clip(raw, 0, 1).tolist(), clipped_count
 
 
 def predict_power(model: ModelBundle, weather_rows: list[dict]) -> list[float]:
+    """Return bounded values for local diagnostics outside orchestration."""
     return predict_with_diagnostics(model, weather_rows)[0]
+
+
+def predict_power_csv(model: ModelBundle, csv_path: Path, *, turbine_id: str, origin: str,
+                      horizon_hours: int, expected_sha256: str) -> list[float]:
+    """Read and validate the exact canonical input file before inference."""
+    from model_input import read_model_input
+    if model.metadata.get("turbine_id") != turbine_id:
+        raise ForecastError("MODEL_UNAVAILABLE", "Турбина во входном CSV не совпадает с моделью.")
+    rows = read_model_input(csv_path, turbine_id=turbine_id, origin=origin,
+                            horizon_hours=horizon_hours, expected_sha256=expected_sha256)
+    return _raw_predictions(model, rows).tolist()
 
 
 def save_model(bundle: ModelBundle, output_root: str | Path | None = None) -> Path:
     """Write a versioned artifact; callers supply only a trusted local output root."""
-    output_root = Path(output_root) if output_root is not None else default_artifact_dir() / "models"
     metadata = bundle.metadata.copy()
     turbine_id = metadata.get("turbine_id")
     model_id = metadata.get("model_id", "")
-    if turbine_id not in {"T1", "T2"} or not isinstance(model_id, str) or not model_id.startswith("sha256:"):
-        raise ForecastError("MODEL_UNAVAILABLE", "Invalid model identity")
-    artifact_dir = Path(output_root) / turbine_id / model_id.removeprefix("sha256:")
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    if turbine_id not in SITE_IDS or not isinstance(model_id, str) or not model_id.startswith("sha256:"):
+        raise ForecastError("MODEL_UNAVAILABLE", "Идентификатор модели некорректен.")
+    output_root = Path(output_root) if output_root is not None else artifact_dir() / "models"
+    model_directory = output_root / turbine_id / model_id.removeprefix("sha256:")
+    model_directory.mkdir(parents=True, exist_ok=True)
     binary = pickle.dumps(bundle.estimator, protocol=pickle.HIGHEST_PROTOCOL)
     metadata["artifact_sha256"] = _digest(binary)
-    (artifact_dir / "model.pkl").write_bytes(binary)
-    (artifact_dir / "metadata.json").write_text(
+    (model_directory / "model.pkl").write_bytes(binary)
+    (model_directory / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     bundle.metadata["artifact_sha256"] = metadata["artifact_sha256"]
     index_path = output_root / "latest.json"
-    index = json.loads(index_path.read_text()) if index_path.exists() else {}
-    index[turbine_id] = str(artifact_dir.resolve())
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else {}
+        if not isinstance(index, dict):
+            raise ValueError("model index is not a mapping")
+    except (OSError, ValueError) as exc:
+        raise ForecastError("MODEL_UNAVAILABLE", "Не удалось обновить реестр моделей.") from exc
+    index[turbine_id] = str(model_directory)
     temporary = index_path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(index, indent=2))
-    temporary.replace(index_path)
-    return artifact_dir
+    temporary.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, index_path)
+    return model_directory
 
 
-def load_model(artifact_dir: str | Path) -> ModelBundle:
-    """Load only a trusted locally generated artifact selected by the server."""
-    if isinstance(artifact_dir, str) and artifact_dir in SITE_IDS:
-        turbine_id = artifact_dir
-        directory = default_artifact_dir() / "models"
-        try:
-            index_path = directory / "latest.json"
-            if index_path.exists():
-                index = json.loads(index_path.read_text())
-                loaded = load_model(Path(index[turbine_id]))
-            else:
-                # Compatibility with trusted, locally trained pre-migration artifacts.
-                loaded = pickle.loads((directory / f"{turbine_id}.pkl").read_bytes())
-            if not isinstance(loaded, PowerModel) or loaded.metadata.get("turbine_id") != turbine_id:
-                raise ValueError("turbine identity")
-            return loaded
-        except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError, EOFError, AttributeError) as exc:
-            raise ForecastError("MODEL_UNAVAILABLE", "Run python -m scripts.train --mode fixture first.") from exc
-    path = Path(artifact_dir)
+def _load_versioned(path: Path) -> ModelBundle:
+    """Verify locally generated metadata and checksum before unpickling."""
     try:
         metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
         binary = (path / "model.pkl").read_bytes()
@@ -246,7 +250,7 @@ def load_model(artifact_dir: str | Path) -> ModelBundle:
         expected_id = "sha256:" + _digest(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
         saved_python = str(metadata.get("python_version", "")).split(".")[:2]
         running_python = platform.python_version().split(".")[:2]
-        if (metadata.get("turbine_id") not in {"T1", "T2"}
+        if (metadata.get("turbine_id") not in SITE_IDS
                 or not isinstance(model_id, str)
                 or model_id != expected_id
                 or path.name != model_id.removeprefix("sha256:")
@@ -262,17 +266,55 @@ def load_model(artifact_dir: str | Path) -> ModelBundle:
         estimator = pickle.loads(binary)
         if not isinstance(estimator, HistGradientBoostingRegressor) or not hasattr(estimator, "n_features_in_") or estimator.n_features_in_ != len(FEATURES):
             raise ValueError("estimator incompatible")
+        # The existing agent consumes these stable keys. They are aliases of
+        # versioned metadata and do not change the artifact identity.
+        metadata["train_origin"] = metadata["train_cutoff"]
+        metadata["features"] = list(FEATURES)
+        metadata["params"] = _PARAMETERS.copy()
+        metadata["sklearn_version"] = sklearn.__version__
         return ModelBundle(estimator, metadata)
-    except (OSError, ValueError, TypeError, KeyError, pickle.UnpicklingError, EOFError, AttributeError, ImportError) as exc:
-        raise ForecastError("MODEL_UNAVAILABLE", f"Model artifact unavailable or invalid: {exc}") from exc
+    except (OSError, ValueError, TypeError, KeyError, pickle.UnpicklingError,
+            EOFError, AttributeError, ImportError) as exc:
+        raise ForecastError("MODEL_UNAVAILABLE", "Артефакт модели отсутствует или повреждён.") from exc
 
 
-def predict_power_csv(model: PowerModel, csv_path: Path, *, turbine_id: str, origin: str,
-                      horizon_hours: int, expected_sha256: str) -> list[float]:
-    """Read exact validated CSV bytes; the agent owns clipping and its diagnostics."""
-    from model_input import read_model_input
-    if model.metadata.get("turbine_id") != turbine_id:
-        raise ForecastError("MODEL_UNAVAILABLE", "Input CSV turbine does not match model")
-    rows = read_model_input(csv_path, turbine_id=turbine_id, origin=origin,
-                            horizon_hours=horizon_hours, expected_sha256=expected_sha256)
-    return _predict_raw(model, rows).tolist()
+def load_model(turbine_id: str | Path) -> ModelBundle:
+    """Resolve the selected turbine's versioned artifact without retraining."""
+    if isinstance(turbine_id, Path) or (isinstance(turbine_id, str) and turbine_id not in SITE_IDS
+                                           and ("/" in turbine_id or "\\" in turbine_id)):
+        return _load_versioned(Path(turbine_id))
+    if turbine_id not in SITE_IDS:
+        raise ForecastError("INVALID_INPUT", "Неизвестная модель турбины.")
+    models_root = artifact_dir() / "models"
+    index_path = models_root / "latest.json"
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            indexed = Path(index[turbine_id])
+            path = indexed if indexed.is_absolute() else models_root.parent.parent / indexed
+            if path.resolve().parent != (models_root / turbine_id).resolve():
+                raise ValueError("model index path outside selected turbine")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ForecastError("MODEL_UNAVAILABLE", "Реестр моделей отсутствует или повреждён.") from exc
+        bundle = _load_versioned(path)
+        if bundle.metadata["turbine_id"] != turbine_id:
+            raise ForecastError("MODEL_UNAVAILABLE", "Артефакт относится к другой турбине.")
+        return bundle
+    # Existing flat artifacts remain usable during migration. The next CLI
+    # training run writes versioned files and an index; no request trains.
+    try:
+        fitted = pickle.loads((models_root / f"{turbine_id}.pkl").read_bytes())
+        if (not isinstance(fitted, ModelBundle)
+                or fitted.metadata.get("turbine_id") != turbine_id
+                or not isinstance(fitted.estimator, HistGradientBoostingRegressor)
+                or fitted.metadata.get("features") != list(FEATURES)):
+            raise ValueError("flat artifact identity")
+        if (fitted.metadata.get("sklearn_version") != sklearn.__version__
+                or utc_time(fitted.metadata["train_origin"]) > utc_time(FIRST_ORIGIN)):
+            raise ValueError("flat artifact training compatibility")
+        fitted.metadata["feature_names"] = list(FEATURES)
+        fitted.metadata["train_cutoff"] = fitted.metadata["train_origin"]
+        return fitted
+    except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError,
+            EOFError, AttributeError, ImportError) as exc:
+        raise ForecastError("MODEL_UNAVAILABLE", "Модель недоступна. Выполните python -m scripts.train --mode fixture.") from exc
