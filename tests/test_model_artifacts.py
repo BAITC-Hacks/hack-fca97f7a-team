@@ -70,24 +70,28 @@ def test_artifact_round_trip_and_corruption(tmp_path):
     assert predict_power(loaded, rows) == predict_power(bundle, rows)
     assert loaded.metadata["model_id"] == bundle.metadata["model_id"]
     (path / "model.pkl").write_bytes(b"corrupt")
-    with pytest.raises(ForecastError, match="Model artifact"):
+    with pytest.raises(ForecastError) as error:
         load_model(path)
+    assert error.value.code == "MODEL_UNAVAILABLE"
 
 
 def test_invalid_training_rows_fail():
     frame = history()
     frame["timestamp"] = frame["timestamp"].astype(object)
     frame.loc[0, "timestamp"] = datetime(2026, 1, 28)
-    with pytest.raises(ForecastError, match="timezone-aware"):
+    with pytest.raises(ForecastError) as error:
         train_model(frame, "2026-01-31T18:00:00Z", "T1")
+    assert error.value.code == "DATA_INVALID"
     frame = history()
     frame.loc[0, "timestamp"] = datetime(2026, 1, 28, 0, 30, tzinfo=timezone.utc)
-    with pytest.raises(ForecastError, match="exact UTC hours"):
+    with pytest.raises(ForecastError) as error:
         train_model(frame, "2026-01-31T18:00:00Z", "T1")
+    assert error.value.code == "DATA_INVALID"
     frame = history()
     frame.loc[0, "power_norm"] = 1.1
-    with pytest.raises(ForecastError, match="Normalized power"):
+    with pytest.raises(ForecastError) as error:
         train_model(frame, "2026-01-31T18:00:00Z", "T1")
+    assert error.value.code == "DATA_INVALID"
     with pytest.raises(ForecastError):
         train_model(history(), "2026-01-31T18:00:00Z", "T3")
 

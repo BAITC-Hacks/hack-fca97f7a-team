@@ -233,10 +233,10 @@ def test_agent_real_csv_and_fitted_model(setup_archive, monkeypatch):
     agent._CACHE.clear()
     request = {"turbine_id": "T1", "origin": FIRST_ORIGIN, "horizon_hours": 24, "mode": "archive"}
     from model import load_model
-    from contracts import ROOT
-    import model
-    monkeypatch.setattr(model, "default_artifact_dir", lambda: ROOT / "artifacts")  # fitted local model; CSV stays temporary
-    result = agent.run_forecast(request, model_loader=load_model)
+    with monkeypatch.context() as model_environment:
+        model_environment.delenv("ARTIFACT_DIR", raising=False)
+        fitted = load_model("T1")
+    result = agent.run_forecast(request, model_loader=lambda turbine: fitted)
     assert result["status"] == "ok", result
     assert result["model_input"]["row_count"] == 24
     from model_input import read_model_input

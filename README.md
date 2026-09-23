@@ -8,7 +8,8 @@ The active application is a React frontend with a FastAPI backend:
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
 Both turbine models are trained from their separate real datasets. Weather is
-still a labeled fixture; map coordinates come from the user's Google Maps links. OpenAI explanation and forecast
+still a labeled fixture; map coordinates come from the user's Google Maps links.
+OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
@@ -113,6 +114,8 @@ Assume ten-minute interval starts in Asia/Almaty. Drop/report ambiguous local
 times and incomplete hours. Each retained hour averages six complete samples.
 Zero-power observations are retained. Generated data/audits are under ignored
 `data/canonical/`; models and inference CSVs are under ignored `artifacts/`.
+The source hashes, clock exclusions and feature assumptions are recorded in
+[DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md).
 
 | Turbine | Complete hourly observations | Frozen training hours |
 |---|---:|---:|
@@ -125,7 +128,9 @@ for the next origin; February labels/observed weather cannot enter the predictor
 
 Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
 normalization denominator and source timestamp convention still need confirmation.
-No farm total, calibrated uncertainty or accuracy claim without held-out truth.
+No farm total or calibrated uncertainty is available. The measured-weather
+holdout in [EVALUATION_REPORT.md](EVALUATION_REPORT.md) assesses the regressor;
+it does not establish accuracy using weather available at a forecast origin.
 Координаты и соответствие турбин подтверждены пользователем:
 
 | Турбина | Широта | Долгота | Источник |
@@ -141,7 +146,13 @@ API помечает их как `user_provided` и возвращает исх�
 ```sh
 python -m pytest -q
 npm --prefix frontend run build
+python -m scripts.evaluate
 ```
+
+The evaluation reports MAE/RMSE/R² for both turbines and 24/48-hour windows,
+compared with origin-refreshed persistence. It uses future-hour *measured* wind
+and temperature; see [EVALUATION_REPORT.md](EVALUATION_REPORT.md) before citing
+the scores.
 
 The Python suite and React TypeScript/Vite build cover
 CSV consumption/integrity, chronology, source identities, input/output validation,
@@ -192,7 +203,7 @@ python -m scripts.smoke_model --models-dir artifacts/models
 
 Команда проверяет восемь синтетических сценариев через реальное чтение CSV.
 
-Проверка интеграции: 50 тестов, сборка React и 8 CSV smoke-сценариев прошли.
+Проверка объединённой ветки: 58 тестов, сборка React и 8 CSV smoke-сценариев прошли.
 Январский MAE: T1 — 0,02373; T2 — 0,02592 (нормализованные доли, измеренная погода).
 
 ## Архивный адаптер Open-Meteo
@@ -207,3 +218,6 @@ python -m scripts.smoke_model --models-dir artifacts/models
 в docs/open-meteo-verification.md. Успешный запрос исторической погоды сегодня
 не доказывает её доступность в момент выпуска. Ветер 10 м — приближение,
 соответствие датчику обучения и высоте ступицы пока не подтверждено.
+
+После интеграции dev-a и обновлённого main: 112 offline-тестов и сборка React прошли.
+Новых живых запросов погоды/OpenAI при этой интеграции не выполнялось.

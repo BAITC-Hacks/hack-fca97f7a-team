@@ -60,6 +60,13 @@ Do not claim full organizer compliance until archive weather and replay work.
 
 ## Ownership and how to make changes
 
+For independent implementation tasks, the primary agent orchestrates: delegate
+bounded coding work to faster subagents in parallel, then perform final integration
+and verification itself. Prefer `gpt-6-sol` for coding and `gpt-6-luna` for bounded
+checks when appropriate. This is a project work rule requested by the user; it
+does not override module ownership, the current task scope, or the requirement to
+coordinate shared contracts and preserve concurrent edits.
+
 | Stream | Owns | Change here |
 |---|---|---|
 | A — integration/weather | api.py, agent.py, weather.py, contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |

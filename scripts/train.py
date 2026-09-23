@@ -63,9 +63,11 @@ def main() -> None:
     parser.add_argument("--skip-validation", action="store_true")
     args = parser.parse_args()
     history, audits = ingest_all()
-    save_canonical(history, audits)
     if {audit["turbine_id"] for audit in audits} != set(SITE_IDS):
-        raise ForecastError("DATA_INVALID", "Training requires both T1 and T2 sources")
+        raise ForecastError("DATA_INVALID", "Для обучения нужны разные исходные истории T1 и T2.")
+    if any(not audit.get("matches_expected_source_sha256", False) for audit in audits):
+        raise ForecastError("DATA_INVALID", "Контрольная сумма исходного файла не совпадает.")
+    save_canonical(history, audits)
     report_dir = artifact_dir() / "training"
     report_dir.mkdir(parents=True, exist_ok=True)
     for audit in audits:

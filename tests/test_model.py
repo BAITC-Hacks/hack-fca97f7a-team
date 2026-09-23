@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from contracts import FIRST_ORIGIN, ForecastError
-from model import predict_power, train_model
+from model import load_model, predict_power, save_model, train_model
 
 
 def training_history():
@@ -29,10 +29,28 @@ def test_completed_hour_cutoff_and_future_data_cannot_change_model():
 def test_duplicate_canonical_hours_rejected():
     history = training_history()
     duplicate = pd.concat([history, history.iloc[:1]], ignore_index=True)
-    with pytest.raises(ForecastError, match="Duplicate"):
+    with pytest.raises(ForecastError, match="повторяющиеся"):
         train_model(duplicate, FIRST_ORIGIN, "T2")
 
 
 def test_model_requires_meaningful_history():
-    with pytest.raises(ForecastError, match="at least 24"):
+    with pytest.raises(ForecastError, match="не менее 24"):
         train_model(training_history().iloc[:5], FIRST_ORIGIN, "T2")
+
+
+def test_versioned_artifact_loads_by_turbine_and_rejects_corruption(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
+    fitted = train_model(training_history(), FIRST_ORIGIN, "T2")
+    artifact = save_model(fitted)
+    loaded = load_model("T2")
+    assert loaded.metadata["model_id"] == fitted.metadata["model_id"]
+    assert loaded.metadata["train_origin"] == FIRST_ORIGIN
+    assert loaded.metadata["train_last_interval_start"] == "2026-01-31T17:00:00Z"
+    assert loaded.metadata["features"] == ["wind_speed_ms", "temperature_c"]
+    rows = [{"wind_speed_ms": 6.0, "temperature_c": -3.0}] * 24
+    assert predict_power(loaded, rows) == predict_power(fitted, rows)
+    with pytest.raises(ForecastError, match="Реестр"):
+        load_model("T1")
+    (artifact / "model.pkl").write_bytes(b"corrupt model")
+    with pytest.raises(ForecastError, match="Артефакт"):
+        load_model("T2")
