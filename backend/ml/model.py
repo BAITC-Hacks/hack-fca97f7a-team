@@ -17,7 +17,7 @@ import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from backend.core.contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, artifact_dir, utc_time
+from backend.core.contracts import FEATURES, FIRST_ORIGIN, ROOT, SITE_IDS, ForecastError, artifact_dir, utc_time
 
 
 _PARAMETERS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
@@ -279,7 +279,8 @@ def save_model(bundle: ModelBundle, output_root: str | Path | None = None) -> Pa
             raise ValueError("model index is not a mapping")
     except (OSError, ValueError) as exc:
         raise ForecastError("MODEL_UNAVAILABLE", "Не удалось обновить реестр моделей.") from exc
-    index[turbine_id] = str(model_directory.resolve())
+    # Keep the registry portable when artifacts are copied to another machine.
+    index[turbine_id] = str(model_directory.relative_to(output_root))
     temporary = index_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary, index_path)
@@ -371,9 +372,18 @@ def load_model(turbine_id: str | Path, *, profile: str = "measured") -> ModelBun
     if index_path.exists():
         try:
             index = json.loads(index_path.read_text(encoding="utf-8"))
-            indexed = Path(index[turbine_id])
-            path = indexed if indexed.is_absolute() else Path.cwd() / indexed
-            if path.resolve().parent != (models_root / turbine_id).resolve():
+            indexed_value = index[turbine_id]
+            if not isinstance(indexed_value, str) or not indexed_value:
+                raise ValueError("invalid model index path")
+            indexed = Path(indexed_value)
+            # Older registries wrote absolute paths or paths relative to the
+            # repository CWD. New registries are relative to latest.json.
+            candidates = ([indexed] if indexed.is_absolute() else
+                          [index_path.parent / indexed, ROOT / indexed, Path.cwd() / indexed])
+            allowed_parent = (models_root / turbine_id).resolve()
+            path = next((candidate for candidate in candidates
+                         if candidate.resolve().parent == allowed_parent and candidate.is_dir()), None)
+            if path is None:
                 raise ValueError("model index path outside selected turbine")
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise ForecastError("MODEL_UNAVAILABLE", "Реестр моделей отсутствует или повреждён.") from exc

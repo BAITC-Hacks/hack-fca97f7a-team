@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import tempfile
 import time
@@ -18,7 +17,7 @@ from pathlib import Path
 import httpx
 
 from backend.adapters.weather import ARCHIVE_URL, MODEL, SITES, _forecast_digest, _parse_forecast
-from backend.core.contracts import FIRST_ORIGIN, ForecastError, artifact_dir, expected_hours, fingerprint, iso, utc_time
+from backend.core.contracts import FIRST_ORIGIN, ForecastError, artifact_dir, fingerprint, iso, utc_time
 
 DOC_URL = "https://open-meteo.com/en/docs/single-runs-api"
 RUN_POLICY = "previous_day_00z_for_18z_origin"
@@ -66,7 +65,8 @@ def _validate(raw: bytes, meta: dict, identity: dict, timing: dict, horizon_hour
         data = json.loads(raw)
         rows, grid_lat, grid_lon, by_hour = _parse_forecast(data, identity["origin"], horizon_hours)
         stamps = sorted(by_hour)
-        if not stamps or any(utc_time(b) - utc_time(a) != timedelta(hours=1) for a, b in zip(stamps, stamps[1:])):
+        if (not stamps or utc_time(stamps[0]) != timing["run"]
+                or any(utc_time(b) - utc_time(a) != timedelta(hours=1) for a, b in zip(stamps, stamps[1:]))):
             raise ValueError("non-contiguous full run")
         canonical = _forecast_digest({"turbine_id": identity["turbine_id"],
                                       "latitude": identity["latitude"], "longitude": identity["longitude"]},
@@ -193,7 +193,8 @@ def prepare_replay_weather(output_dir: Path, *, days: int = 28, client: httpx.Cl
                         data = json.loads(raw)
                         rows, grid_lat, grid_lon, by_hour = _parse_forecast(data, origin, 48)
                         stamps = sorted(by_hour)
-                        if not stamps or any(utc_time(b) - utc_time(a) != timedelta(hours=1) for a, b in zip(stamps, stamps[1:])):
+                        if (not stamps or utc_time(stamps[0]) != timing["run"]
+                                or any(utc_time(b) - utc_time(a) != timedelta(hours=1) for a, b in zip(stamps, stamps[1:]))):
                             raise ForecastError("DATA_INVALID", "Погодный выпуск содержит пропуск во временном ряду.")
                         canonical = _forecast_digest(site, {"model": MODEL, "run": identity["params"]["run"]},
                                                      grid_lat, grid_lon, by_hour)

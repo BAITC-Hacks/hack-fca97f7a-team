@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -84,7 +85,7 @@ def test_provider_registry_relative_artifact_root_and_wrong_profile(monkeypatch,
         load_model("T2", profile="open_meteo_ecmwf_ifs_10m")
     path = save_model(provider_model())
     registry = tmp_path / "artifacts" / "models" / "open_meteo_ecmwf_ifs_10m" / "latest.json"
-    assert json.loads(registry.read_text())["T2"] == str(path.resolve())
+    assert json.loads(registry.read_text())["T2"] == f"T2/{path.name}"
     assert load_model("T2", profile="open_meteo_ecmwf_ifs_10m").metadata["profile"] == "open_meteo_ecmwf_ifs_10m"
     # Older local registries can contain a path relative to the working directory.
     registry.write_text(json.dumps({"T2": str(path)}))
@@ -94,6 +95,21 @@ def test_provider_registry_relative_artifact_root_and_wrong_profile(monkeypatch,
     metadata["profile"] = "measured"
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(ForecastError, match="Артефакт"):
+        load_model("T2", profile="open_meteo_ecmwf_ifs_10m")
+
+
+def test_provider_registry_survives_relocation_and_rejects_other_turbine(monkeypatch, tmp_path):
+    source = tmp_path / "source" / "artifacts"
+    monkeypatch.setenv("ARTIFACT_DIR", str(source))
+    path = save_model(provider_model())
+    target = tmp_path / "moved" / "artifacts"
+    shutil.copytree(source, target)
+    monkeypatch.setenv("ARTIFACT_DIR", str(target))
+    monkeypatch.chdir(tmp_path)
+    assert load_model("T2", profile="open_meteo_ecmwf_ifs_10m").metadata["model_id"] == "sha256:" + path.name
+    index = target / "models" / "open_meteo_ecmwf_ifs_10m" / "latest.json"
+    index.write_text(json.dumps({"T2": f"../T1/{path.name}"}))
+    with pytest.raises(ForecastError, match="Реестр"):
         load_model("T2", profile="open_meteo_ecmwf_ifs_10m")
 
 
