@@ -1,5 +1,6 @@
 """Chronology and source isolation for provider-feature training."""
 import pandas as pd
+import numpy as np
 import pytest
 
 from backend.core.contracts import ForecastError
@@ -47,3 +48,21 @@ def test_confirmation_boundaries_and_gate_tradeoff():
     assert promotion_gate({"mae": .15, "rmse": .3}, old, constant)
     assert not promotion_gate({"mae": .15, "rmse": .5}, old, constant)
     assert not promotion_gate({"mae": .28, "rmse": .3}, old, constant)
+
+
+def test_provider_comparison_preserves_original_measured_control():
+    from backend.ml.model import predict_power, train_model
+    from scripts.train_forecast import comparison
+
+    stamps = pd.date_range("2025-12-25T00:00:00Z", "2026-01-03T00:00:00Z", freq="h")
+    wind = 6 + 3 * np.sin(np.arange(len(stamps)) / 5)
+    history = pd.DataFrame({"turbine_id": "T1", "timestamp": stamps,
+                            "wind_speed_ms": wind, "temperature_c": 0.,
+                            "power_norm": wind / 12})
+    context = {"provider": "open-meteo", "model": "ecmwf_ifs", "wind_height_m": 10,
+               "temperature_height_m": 2, "training_weather_kind": "retrospective_stitched_forecast",
+               "availability_verified": False, "weather_csv_sha256": "a" * 64}
+    _, points = comparison(history, history, "T1", "2026-01-01", "2026-01-03", "standard", context)
+    baseline = train_model(history, "2026-01-01T00:00:00Z", "T1", variant="baseline")
+    expected = predict_power(baseline, points[["wind_speed_ms", "temperature_c"]].to_dict("records"))
+    np.testing.assert_array_equal(points.legacy_prediction.to_numpy(), expected)

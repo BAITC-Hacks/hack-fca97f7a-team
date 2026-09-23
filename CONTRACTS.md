@@ -183,7 +183,8 @@ contract tests together. Do not silently rename columns or change units.
 ## Model seam — B owns `backend/ml/model.py` and `backend/ml/data.py`
 
 ```python
-train_model(history, origin, turbine_id) -> PowerModel
+train_model(history, origin, turbine_id, *, profile="measured", recipe="standard",
+            weather_context=None, variant=None) -> PowerModel
 load_model(turbine_id, *, profile="measured") -> PowerModel
 predict_power_csv(model, csv_path, *, turbine_id, origin,
                   horizon_hours, expected_sha256) -> list[float]
@@ -203,6 +204,17 @@ to [0,1] and reports how many values needed clamping.
 
 To replace the regressor, change fit/load/predict inside this module and retrain
 via `python -m scripts.train --mode fixture`. Preserve output alignment and metadata.
+For the `measured` profile, omitted `variant` selects `candidate`
+(`hourly-hgbr-v2`: absolute error, 300 iterations, no automatic early stopping).
+`variant="baseline"` retains the original `hourly-hgbr-v1` recipe and identity.
+Provider profiles retain their existing recipes and identities; they reject an
+explicit measured variant. Versioned loading checks known implementation/parameter
+pairs and the estimator parameters. The measured training CLI accepts
+`--variant candidate|baseline`; provider training remains `scripts.train_forecast`.
+`python -m scripts.compare_models` compares October–January measured-weather
+diagnostics without changing any active registry. Provider evaluation explicitly
+uses measured `baseline` as its legacy control. CSV/API contracts are unchanged.
+See [MODEL_IMPROVEMENT.md](MODEL_IMPROVEMENT.md).
 `predict_power(model, rows)` is the lower-level helper; orchestration must call the
 CSV interface. Models are fitted once from separately identified turbine datasets,
 not during HTTP requests or React renders.
