@@ -1,84 +1,77 @@
 # Working agreement
 
-## Objective and current scope
+## Current task and source of truth
 
-Build a reliable wind-power demo: select a registered turbine on a map → obtain
-weather through a tool → validate/convert features → predict normalized hourly
-power → display chart/table/analysis → advance origin and recalculate.
+The active application is **React + FastAPI**. The user explicitly authorized
+this migration, real weather-to-CSV-to-model inference, and an OpenAI explanation
+adapter. Earlier instructions deferring React/FastAPI/LLM implementation are
+superseded. `app.py` is only the legacy Streamlit prototype.
 
-The user has authorized implementation. Earlier planning-only instructions in
-PLAN.md are superseded by that request. Read PLAN.md for domain context, but use
-the actual files and public contracts as the implementation source of truth.
+Read [CONTRACTS.md](CONTRACTS.md) before changing a module boundary. README is the
+launch/handoff guide; PLAN.md is the current scope. The latest user instruction
+wins over these files. Do not add a database, queues or distributed orchestration.
 
-The first slice uses real supplied turbine measurements and fitted regressors,
-synthetic weather, clearly fictional map coordinates, and computed summaries.
-Do not describe stubbed weather or template prose as a live API/LLM result.
-Do not build React/FastAPI, full February replay, live APIs, or paid inference
-until requested for the next workstream. Preserve the working local demo.
+## Required flow and boundaries
+
+1. React selects a registered turbine and submits an explicit forecast origin.
+2. `api.py` validates HTTP bodies and calls `agent.run_forecast`.
+3. `weather.py` normalizes provider output into hourly wind m/s and temperature °C.
+4. `model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
+5. `model.predict_power_csv` reads and validates that exact file before inference.
+6. The agent returns numeric predictions, statistics, provenance and actual trace.
+7. React shows the result and requests an explanation by server-stored forecast ID.
+8. `explanation.py` calls OpenAI with generated forecast facts, or returns an
+   explicitly labeled computed fallback. Questions use the same stored result.
+
+No UI/framework imports in core modules. No weather or inference logic in React.
+Do not bypass the CSV boundary by exporting a file only after prediction. Never
+let the LLM generate or overwrite numerical power predictions. Keys stay server-side.
 
 ## Data truth and chronology
 
-- The current input files are distinct `turbine 1.csv` and `turbine 2.csv` under
-  `data/`, with 142,360 and 149,499 records respectively. Both end January 31,
-  2026. There is no February truth, despite the filenames. Do not concatenate
-  duplicate downloads or relabel one turbine's records as another turbine.
-- Never modify supplied CSVs or the organizer brief. Generated canonical data,
-  models and outputs live in ignored directories, with source hashes/audits.
-- Assume source timestamps are ten-minute interval starts in Asia/Almaty until
-  confirmed. Drop/report ambiguous/nonexistent local times; convert to UTC.
-- An hourly observation requires all six distinct ten-minute intervals. Mean
-  wind, temperature and power over complete hours; report dropped hours. Keep
-  zero-power observations. Do not interpolate labels across outages.
-- Fit only hours whose end is at or before the frozen first origin
-  `2026-01-31T18:00:00Z`. Never train on February targets/observed weather.
-- Predict hours starting origin+1h through origin+horizon. Origins are explicit,
-  UTC-aware, hourly; horizon is 24 or 48. No dependency on today's date.
-- Weather initialization is not historical availability. Reject future-available
-  weather, incomplete coverage and nonfinite features. Archive mode must never
-  silently use fixtures, reanalysis or realized weather.
-- Output is normalized power in [0,1], not MW/MWh. No physical farm total without
-  turbine capacities and normalization metadata. No accuracy claim without truth.
+- Preserve supplied files in `data/`. Distinct T1/T2 files contain 142,360/149,499
+  rows and end January 31, 2026; no February truth is included despite filenames.
+- Never relabel one turbine's history as another; reject identical source hashes.
+- Source timestamps are assumed ten-minute interval starts in Asia/Almaty; drop
+  and audit ambiguous/nonexistent local times, then convert to UTC.
+- An hourly observation requires all six distinct samples; average the three
+  measurements. Do not fill label gaps or remove zero-power observations.
+- Freeze training at `2026-01-31T18:00:00Z`, using only completed hours. Never use
+  February targets/actual weather to train, select or feed the forecasting model.
+- Predict interval starts origin+1h through origin+24/48h. Origins are explicit,
+  UTC-aware and hourly; never use today's date implicitly for historical replay.
+- Weather initialization ≤ availability ≤ origin; verify every forecast hour,
+  turbine identity and finite units before inference or cache reuse.
+- Archive mode requires verified as-issued forecasts. Never replace them silently
+  with fixtures, reanalysis, actual weather or retrospectively generated hindcasts.
+- Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
+  accuracy claim without held-out truth. Report clipping and data exclusions.
 
-## Architecture and contracts
+Weather/coordinates remain synthetic fixtures in the current app. They must be
+labeled. OpenAI is a real adapter; missing keys/failure must be labeled fallback.
+Do not claim full organizer compliance until archive weather and replay work.
 
-- One Python process; Streamlit is a replaceable presentation layer.
-- `contracts.py`: request/result/tool types, timestamps, errors, CSV serialization.
-- `data.py`: source ingestion and audits. `model.py`: fit/load/predict only.
-- `weather.py`: site registry and weather adapter. `agent.py`: orchestration,
-  validation, result fingerprints/cache and executed-step trace.
-- `explanation.py`: computed summary now; bounded OpenAI integration later.
-- `app.py`: controls/map/rendering/session state; no training/weather logic.
-- No core module may import Streamlit or depend on browser/session state.
-  A later FastAPI layer wraps these functions; React consumes their JSON results.
-- Keep public functions and JSON fields in `contracts.py`/PLAN.md stable. Prefer
-  additive changes; coordinate breaking changes with all affected owners.
-- A marker resolves to a configured turbine ID. Background clicks cannot invent
-  sites. Coordinates must never be accepted as an unvalidated model identity.
-- Train via CLI, not on UI reruns. Cache identity includes model, request, site,
-  normalized weather and meaningful provenance; excludes retrieval wall time.
-- Reject invalid weather before using cached predictions. Return structured
-  errors and never render an old result as a new successful forecast.
-- Explanations consume existing computed facts. They do not generate power
-  predictions. LLM failure must retain a labeled template summary.
-- Keep the first slice small: no queues, database, service hierarchy, or general
-  plugin framework. Simple test injection is enough.
+## Ownership and how to make changes
 
-## Ownership for parallel work after this slice
-
-| Stream | Owns | Next task |
+| Stream | Owns | Change here |
 |---|---|---|
-| A: integration/weather | agent.py, weather.py, contracts.py, fixture generator, site config, README, dependencies | Verify as-issued archive and coordinates; add thin FastAPI endpoints if frontend work starts |
-| B: data/model | data.py, model.py, scripts/train.py, data/model tests, future replay.py | Validate timezone/metadata, chronological baseline evaluation, full February replay |
-| C: frontend/explanation | app.py, explanation.py, UI/summary tests, future frontend/ | React UI against frozen contracts; bounded OpenAI summary and scoped questions |
+| A — integration/weather | api.py, agent.py, weather.py, contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |
+| B — data/model | data.py, model_input.py, model.py, scripts/train.py, corresponding tests | CSV feature schema, ingestion, predictor, replay |
+| C — frontend/explanation | frontend/, explanation.py, summary tests | UI, central API client/types, grounded prose/questions |
 
-Shared dependency and contract edits go through A. Avoid editing another
-stream's files without coordination. Do not overwrite concurrent user changes.
-These ownership labels organize future human work, not permission to start
-extra agents or expand the current task.
+Read CONTRACTS.md for signatures, DTOs, CSV version and change instructions.
+Coordinate shared contract changes with affected owners; prefer additive fields.
+Keep feature order/units/version aligned across the CSV writer, reader and model.
+Train through CLI, not in requests. Load only locally generated model artifacts.
 
-## Development and verification
+Keep HTTP errors structured. Never return provider exception details or keys.
+Clear stale result/analysis/question state when input changes. Reject client-supplied
+predictions in explanation requests; use server-stored forecast IDs. In-memory
+stores are bounded; a restart/eviction returns 404 and the client regenerates.
 
-Use Python 3.12+ in `.venv` (required by the pinned NumPy); current workspace has Python 3.14. Run from repo root:
+## Development
+
+Python 3.12+ (verified 3.14.4), Node 22+. From repo root:
 
 ```sh
 python -m venv .venv
@@ -86,22 +79,29 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 python -m scripts.make_fixtures
 python -m scripts.train --mode fixture
-python -m pytest -q
-python -m streamlit run app.py
+npm --prefix frontend ci
+npm --prefix frontend run build
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
-Test relevant boundaries: source mapping/deduplication, complete-hour aggregation,
-timezone and leakage guards, weather coverage/availability, prediction bounds,
-cache invalidation, summaries, and UI stale-result behavior. Exercise both demo
-origins, both horizons, and both turbines. Do not assert exact learned predictions.
-Distinguish real browser checks from Streamlit AppTest simulation.
+FastAPI serves the built React app at http://localhost:8000 and docs at /docs.
+For frontend hot reload run `npm --prefix frontend run dev` separately (5173
+proxies /api to 8000). `.env` loads server-side with environment taking precedence.
+Never put credentials in VITE_ variables or frontend files.
 
-No API credentials are needed for the slice. Future OpenAI keys belong only in
-server environment variables; never commit or expose them to React. NVIDIA
-credit is reserved; do not introduce a second provider without a concrete task.
+## Verification and commits
 
-Commit working increments regularly, as explicitly requested by the user. Keep commits scoped and do not push unless asked.
+Run `python -m pytest -q` and `npm --prefix frontend run build` for interface changes.
+Test CSV bytes/schema/hash, training cutoff, weather availability, cache invalidation,
+API errors/downloads, stored-context explanation and stale UI handling. Tests clear
+OPENAI_API_KEY and mock SDK responses; no paid calls in the automated suite.
+TestClient requires localhost socket access in a restricted sandbox.
 
-Before handoff, document actual launch/test commands, evidence, stub boundaries,
-unresolved provenance/timezone issues and the next task for each stream. Do not
-claim the full organizer task is complete while archived weather/replay is absent.
+The user approved one live OpenAI smoke test, which passed. Do not treat that as
+permission for unbounded repeated paid tests. Browser checks should use a backend
+with an empty OPENAI_API_KEY unless further live tests are requested.
+
+Commit working increments regularly as explicitly requested. Keep changes scoped;
+never push unless asked. Preserve concurrent edits. Update README/CONTRACTS when
+interfaces or launch commands change. Report real checks separately from mocked
+ones and list remaining stubs accurately.
