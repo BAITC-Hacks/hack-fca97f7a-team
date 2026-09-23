@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { askQuestion, createForecast, downloadCsv, explainForecast, getSites, refreshWeather } from './api'
+import { ApiFailure, askQuestion, createForecast, downloadCsv, explainForecast, getForecast, getSites, refreshWeather } from './api'
 import type { Explanation, ForecastRequest, ForecastResult, Site } from './types'
 import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail, weatherProviderLabel } from './ru'
 import PowerChart from './PowerChart'
@@ -9,6 +9,22 @@ import { saveBlob } from './chartExport'
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return ru.requestFailed
+}
+
+const savedForecastKey = 'wind-demo:last-live-forecast-id'
+
+function savedForecastId(): string | null {
+  try {
+    const id = localStorage.getItem(savedForecastKey)
+    return id && /^[0-9a-f]{64}$/.test(id) ? id : null
+  } catch { return null }
+}
+
+function rememberForecast(id: string | null) {
+  try {
+    if (id) localStorage.setItem(savedForecastKey, id)
+    else localStorage.removeItem(savedForecastKey)
+  } catch { /* Browser storage can be disabled; current results still work. */ }
 }
 
 function Comparison({ current, previous }: { current: ForecastResult, previous: ForecastResult | null }) {
@@ -34,7 +50,10 @@ export default function App() {
   const [previous, setPrevious] = useState<ForecastResult | null>(null)
   const [explanation, setExplanation] = useState<Explanation | null>(null)
   const [explanationError, setExplanationError] = useState('')
+  const [explanationPending, setExplanationPending] = useState(false)
+  const [restored, setRestored] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [question, setQuestion] = useState('')
   const [conversation, setConversation] = useState<{ question: string, answer: Explanation }[]>([])
@@ -52,20 +71,61 @@ export default function App() {
     forecastController.current?.abort()
     answerController.current?.abort()
     setResult(null); setPrevious(null); setExplanation(null); setConversation([]); setQuestion(''); setPendingQuestion('')
-    setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setRefreshing(false); setAsking(false)
+    setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setRestoring(false); setRefreshing(false); setAsking(false); setExplanationPending(false); setRestored(false)
   }
 
   useEffect(() => {
     const controller = new AbortController()
+    const epoch = requestEpoch.current
+    forecastController.current = controller
     setSites([]); setSiteId(''); setSiteError('')
-    getSites(controller.signal).then(loaded => {
-      if (controller.signal.aborted) return
+    getSites(controller.signal).then(async loaded => {
+      if (controller.signal.aborted || epoch !== requestEpoch.current) return
       setSites(loaded)
       if (loaded.length) setSiteId(loaded[0].turbine_id)
       else setSiteError(ru.noSites)
+      const id = savedForecastId()
+      if (!id || !loaded.length) return
+      setLoading(true)
+      setRestoring(true)
+      try {
+        const forecast = await getForecast(id, controller.signal)
+        if (controller.signal.aborted || epoch !== requestEpoch.current) return
+        if (forecast.status !== 'ok' || forecast.forecast_id !== id || forecast.mode !== 'live' || !loaded.some(site => site.turbine_id === forecast.turbine_id) || !forecast.hours?.length || !forecast.model_input) {
+          rememberForecast(null)
+          throw new Error(ru.savedForecastUnavailable)
+        }
+        setSiteId(forecast.turbine_id)
+        setHorizon(forecast.horizon_hours)
+        lastSuccess.current = forecast
+        setResult(forecast)
+        setRestored(true)
+      } catch (err) {
+        if (controller.signal.aborted || epoch !== requestEpoch.current) return
+        if (err instanceof ApiFailure && err.code === 'NOT_FOUND') rememberForecast(null)
+        setError(err instanceof ApiFailure && err.code === 'NOT_FOUND' ? ru.savedForecastUnavailable : ru.savedForecastLoadFailed)
+      } finally {
+        if (!controller.signal.aborted && epoch === requestEpoch.current) { setLoading(false); setRestoring(false) }
+      }
     }).catch(err => { if (!controller.signal.aborted) setSiteError(errorMessage(err)) })
     return () => controller.abort()
   }, [])
+
+  async function loadExplanation(forecast: ForecastResult, controller: AbortController, epoch: number) {
+    setExplanationPending(true)
+    setExplanationError('')
+    try {
+      const prose = await explainForecast(forecast.forecast_id, controller.signal)
+      if (epoch === requestEpoch.current && !controller.signal.aborted) {
+        if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error(ru.staleExplanation)
+        setExplanation(prose)
+      }
+    } catch (err) {
+      if (epoch === requestEpoch.current && !controller.signal.aborted) setExplanationError(errorMessage(err))
+    } finally {
+      if (epoch === requestEpoch.current && !controller.signal.aborted) setExplanationPending(false)
+    }
+  }
 
   async function runForecast(next: { siteId: string, horizon: 24 | 48 }, refresh = false) {
     invalidate()
@@ -87,16 +147,9 @@ export default function App() {
       setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id ? lastSuccess.current : null)
       lastSuccess.current = forecast
       setResult(forecast)
+      rememberForecast(forecast.forecast_id)
       setLoading(false)
-      try {
-        const prose = await explainForecast(forecast.forecast_id, controller.signal)
-        if (epoch === requestEpoch.current) {
-          if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error(ru.staleExplanation)
-          setExplanation(prose)
-        }
-      } catch (err) {
-        if (epoch === requestEpoch.current && !controller.signal.aborted) setExplanationError(errorMessage(err))
-      }
+      await loadExplanation(forecast, controller, epoch)
     } catch (err) {
       if (epoch === requestEpoch.current && !controller.signal.aborted) { setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
     }
@@ -157,16 +210,17 @@ export default function App() {
           {siteError && <div className="error-banner" role="alert">{siteError}</div>}
           <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
           <p className="origin-note">{ru.liveTime}</p>
-          <button className="primary-button" disabled={!siteId || loading} onClick={() => runForecast({ siteId, horizon })}>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
+          <button className="primary-button" disabled={!siteId || loading} onClick={() => runForecast({ siteId, horizon })}>{loading ? (restoring ? ru.openingSavedForecast : refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
           {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
         <p className="scope-note">{ru.liveNotice}</p>
       </aside>
       <div className="results-column">
-        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.emptyTitle}</h2><p>{loading ? ru.loadingHint : ru.emptyText}</p></section>}
+        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? (restoring ? ru.openingSavedForecast : refreshing ? ru.refreshingWeather : ru.calculating) : ru.emptyTitle}</h2><p>{loading ? (restoring ? ru.savedForecastNotice : ru.loadingHint) : ru.emptyText}</p></section>}
         {result && <>
           <section className="panel result-panel">
             <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><div className="result-actions"><button type="button" className="secondary-button" onClick={() => runForecast({ siteId, horizon }, true)}>{ru.refreshWeather}</button><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div></div>
+            {restored && <p className="origin-note" role="status"><strong>{ru.savedForecast}.</strong> {ru.savedForecastNotice}</p>}
             <div className="weather-freshness" aria-label={ru.weatherRetrieved}><span><strong>{ru.weatherProvider}</strong> {weatherProviderLabel(result.weather_provenance.provider)}</span><span><strong>{ru.weatherRetrieved}</strong> {result.weather_provenance.retrieved_at ? localTime(result.weather_provenance.retrieved_at, result.timezone) : ru.weatherRetrievalUnknown}</span>{result.weather_provenance.weather_cache_hit === true && <span>{ru.cachedWeather}</span>}</div>
             <div className="metrics">
               <div><span>{ru.meanPower}</span><strong>{percent(mean)}</strong><small>{ru.normalized}</small></div>
@@ -181,7 +235,7 @@ export default function App() {
             <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
               <div className="chat-message assistant-message">
                 <span className="message-author">{ru.analysisAuthor}</span>
-                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
+                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationPending ? <p className="muted loading-status" role="status">{ru.explanationLoading}</p> : restored ? <><p className="muted">{ru.savedExplanationHint}</p><button type="button" className="secondary-button" onClick={() => { if (!result) return; const controller = new AbortController(); forecastController.current = controller; void loadExplanation(result, controller, requestEpoch.current) }}>{ru.loadExplanation}</button>{explanationError && <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
               </div>
               {conversation.map((exchange, index) => <div className="chat-exchange" key={index}>
                 <div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{exchange.question}</p></div>

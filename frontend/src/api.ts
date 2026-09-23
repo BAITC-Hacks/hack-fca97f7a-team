@@ -44,6 +44,10 @@ export function createForecast(input: ForecastRequest, signal?: AbortSignal): Pr
   return request<ForecastResult>('/forecasts', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input), signal })
 }
 
+export function getForecast(id: string, signal?: AbortSignal): Promise<ForecastResult> {
+  return request<ForecastResult>(`/forecasts/${encodeURIComponent(id)}`, { signal })
+}
+
 export function refreshWeather(turbineId: string, signal?: AbortSignal): Promise<{ status: 'ok' }> {
   return request<{ status: 'ok' }>('/weather/refresh', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ turbine_id: turbineId }), signal })
 }

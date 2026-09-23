@@ -84,6 +84,22 @@ def test_unknown_forecast_id_returns_404():
     assert response.json()["code"] == "NOT_FOUND"
 
 
+def test_saved_forecast_get_reuses_checked_result_without_new_inference(monkeypatch):
+    created = client.post("/api/forecasts", json=VALID).json()
+    forecast_id = created["forecast_id"]
+    with api._FORECASTS_LOCK:
+        api._FORECASTS[forecast_id]["hours"][0]["baseline_norm"] = 0.5
+    monkeypatch.setattr(api, "run_forecast", lambda *_args: (_ for _ in ()).throw(AssertionError("new inference")))
+    restored = client.get(f"/api/forecasts/{forecast_id}")
+    assert restored.status_code == 200
+    assert restored.json()["forecast_id"] == forecast_id
+    assert restored.json()["hours"] == created["hours"]
+    assert "baseline_norm" not in restored.text
+    missing = client.get("/api/forecasts/invalid")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "NOT_FOUND"
+
+
 def test_explanations_use_stored_result_and_ignore_client_prediction(monkeypatch):
     created = client.post("/api/forecasts", json=VALID).json()
     seen = []

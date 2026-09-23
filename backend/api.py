@@ -196,6 +196,12 @@ def _http_error(_request: Request, exc: HTTPException) -> JSONResponse:
     return _error(exc.status_code, "HTTP_ERROR", str(exc.detail))
 
 
+@app.get("/api/forecasts/{forecast_id}")
+def get_forecast(forecast_id: str) -> dict:
+    """Reopen a checked, server-owned forecast without running weather or inference."""
+    return {**_get_forecast(forecast_id), "forecast_id": forecast_id}
+
+
 @app.get("/api/forecasts/{forecast_id}/download")
 def download_forecast(
     forecast_id: str,
