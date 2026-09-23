@@ -1,5 +1,8 @@
 # Wind power forecast — React + FastAPI
 
+Implementation backlog for three developers: [tasks.md](tasks.md). The demo must
+be fully in Russian; localization is tracked there as required remaining work.
+
 The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**

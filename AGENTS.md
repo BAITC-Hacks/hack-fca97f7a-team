@@ -11,6 +11,11 @@ Read [CONTRACTS.md](CONTRACTS.md) before changing a module boundary. README is t
 launch/handoff guide; PLAN.md is the current scope. The latest user instruction
 wins over these files. Do not add a database, queues or distributed orchestration.
 
+The demo must be in Russian: all user-facing UI, explanations, fallback answers,
+questions, errors and accessibility labels. Keep API identifiers and canonical CSV
+headers unchanged. [tasks.md](tasks.md) tracks remaining implementation work for
+the three developers, with ownership, priorities and acceptance criteria.
+
 ## Required flow and boundaries
 
 1. React selects a registered turbine and submits an explicit forecast origin.
