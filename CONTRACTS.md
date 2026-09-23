@@ -25,18 +25,26 @@ Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
-| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status}]}` |
+| `GET /api/sites?mode=fixture` | mode: fixture/archive/live | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
 | `POST /api/forecasts/{id}/explanation` | `{"backend":"llm"}` (or template) | explanation below |
 | `POST /api/forecasts/{id}/questions` | `{"question":"When is output lowest?","backend":"llm"}` | answer using this stored forecast |
 
-Forecast request is unchanged across UIs:
+Fixture/archive requests retain their explicit origin; live requests **omit** origin (sending it in live returns HTTP 400 `INVALID_INPUT`):
 
 ```json
 {"turbine_id":"T2","origin":"2026-01-31T18:00:00Z","horizon_hours":48,"mode":"fixture"}
+{"turbine_id":"T2","horizon_hours":48,"mode":"live"}
 ```
+
+The server chooses the next whole UTC hour strictly after receipt, passes it as an
+explicit canonical origin into the agent, and returns that origin in the normal
+forecast response. If the UTC boundary passes before fetching, the API may
+reissue a fresh origin once (only within two minutes of request receipt). If
+retrieval crosses the chosen hour, the agent retries once with a new origin;
+otherwise it fails explicitly. No historical date is relabeled as live.
 
 Success includes `status=ok`, those request fields, `timezone`, `run_id`,
 `model_id`, `fingerprint`, `cache_hit`, `train_last_interval_start`,
@@ -87,7 +95,12 @@ provider field names in React or the estimator.
 
 Manifest requires turbine ID, run ID, provider, source URL, initialization and
 availability timestamps, availability basis, provenance status, raw checksum and
-interpolation policy. `initialized_at <= available_at <= origin` is mandatory.
+interpolation policy. For fixture/archive `initialized_at <= available_at <= origin`
+is mandatory. Only live may set `initialized_at=null`: generic Open-Meteo best
+match does not expose a verified issued-run initialization; do not invent one.
+Live sets `fetched_at=available_at` to the response-completion UTC timestamp,
+`availability_basis=response_received`, `provenance_status=live`, and enforces
+`available_at <= origin`. This is current weather, **not** a historical as-issued run.
 Archive mode requires verified provenance. Fixture mode retains two synthetic
 runs per turbine and fictional locations; `load_sites("archive")` returns the
 organizer-supplied coordinates T1 (43.645150, 78.535604) / T2 (43.643198,
@@ -104,6 +117,17 @@ requested turbine coordinates and are recorded in `weather_provenance`.
 `interpolation=none` means the adapter does not interpolate; it does **not**
 claim native provider hourly or vertical resolution. All target hours
 origin+1 through origin+24/48 must be unique, ordered and finite. There is no fixture fallback.
+
+Live uses `https://api.open-meteo.com/v1/forecast`, one request per turbine,
+`forecast_hours=72`, 10 m wind in m/s, 2 m temperature in °C and UTC hourly
+starts. It selects exactly origin+1 through +24/48 without interpolation or
+fixture fallback. `run_id=live-best-match/<raw_sha256>` identifies the retrieved
+response, **not** an issued model run. The raw response is retained with checksum
+in `artifacts/weather_raw/`, and grid coordinates and the 10 m proxy warning are
+exposed. `GET /api/sites?mode=live` returns organizer-supplied locations, not
+fixture coordinates. Open-Meteo data are licensed CC BY 4.0 (attribution required);
+the free public API is for noncommercial use subject to provider limits. Live
+forecast quality is not established against the historical training sensor height.
 
 Archive remains unavailable by default. Configure server-side
 `OPEN_METEO_ARCHIVE_MANIFEST` to point at an operator-reviewed JSON file, e.g.:

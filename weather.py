@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-from contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, utc_time
+from contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, next_live_origin, utc_now, utc_time
 
 SITES = (
     {"turbine_id": "T1", "latitude": 0.0, "longitude": 0.0,
@@ -28,6 +28,7 @@ ARCHIVE_SITES = (
      "timezone": "Asia/Almaty", "coordinate_status": "organizer-supplied"},
 )
 ARCHIVE_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
+LIVE_URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "ecmwf_ifs"
 _HOUR = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:00(?::00)?(?:Z)?$")
 _SHA = re.compile(r"^[a-f0-9]{64}$")
@@ -190,16 +191,100 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
             "grid_latitude": data.get("latitude"), "grid_longitude": data.get("longitude")}, "rows": rows}
 
 
+def _live_weather(site: dict, origin: str, horizon_hours: int) -> dict:
+    params = {"latitude": site["latitude"], "longitude": site["longitude"],
+              "hourly": "wind_speed_10m,temperature_2m", "wind_speed_unit": "ms",
+              "temperature_unit": "celsius", "timezone": "UTC", "forecast_hours": 72}
+    try:
+        response = httpx.get(LIVE_URL, params=params, timeout=8.0, follow_redirects=False)
+        fetched_at = utc_now().isoformat(timespec="microseconds").replace("+00:00", "Z")  # completion, not model initialization
+        if response.status_code == 429:
+            raise _unavailable("Лимит погодного API исчерпан; повторите запрос позже.")
+        if response.status_code != 200:
+            raise _unavailable("Погодный API недоступен; повторите запрос позже.")
+        raw = response.content
+        digest = hashlib.sha256(raw).hexdigest()
+        data = json.loads(raw)
+    except httpx.TimeoutException as exc:
+        raise _unavailable("Погодный API не ответил вовремя; повторите запрос позже.") from exc
+    except httpx.HTTPError as exc:
+        raise _unavailable("Погодный API недоступен; повторите запрос позже.") from exc
+    except (UnicodeError, ValueError) as exc:
+        raise ForecastError("DATA_INVALID", "Ответ погодного API имеет неверный формат.") from exc
+    try:
+        if not isinstance(data, dict) or data.get("error") is True:
+            raise ValueError("provider error")
+        units, hours = data["hourly_units"], data["hourly"]
+        grid_lat, grid_lon = data["latitude"], data["longitude"]
+        if (type(grid_lat) not in (int, float) or type(grid_lon) not in (int, float)
+                or not math.isfinite(grid_lat) or not math.isfinite(grid_lon)
+                or not -90 <= grid_lat <= 90 or not -180 <= grid_lon <= 180
+                or type(data["utc_offset_seconds"]) is not int or data["utc_offset_seconds"] != 0
+                or data["timezone"] not in ("UTC", "GMT")
+                or units["time"] not in ("iso8601", "ISO8601")
+                or units["wind_speed_10m"] != "m/s" or units["temperature_2m"] != "°C"):
+            raise ValueError("units or grid")
+        stamps, winds, temps = (hours[k] for k in ("time", "wind_speed_10m", "temperature_2m"))
+        if not all(isinstance(a, list) for a in (stamps, winds, temps)) or not len(stamps) == len(winds) == len(temps):
+            raise ValueError("array lengths")
+        by_hour = {}
+        for stamp, wind, temp in zip(stamps, winds, temps):
+            stamp = _provider_hour(stamp)
+            if (stamp in by_hour or type(wind) not in (int, float) or type(temp) not in (int, float)
+                    or not math.isfinite(wind) or not math.isfinite(temp) or wind < 0):
+                raise ValueError("duplicate or invalid measurement")
+            by_hour[stamp] = {"valid_at": stamp, "wind_speed_ms": float(wind), "temperature_c": float(temp)}
+        rows = [by_hour[hour] for hour in expected_hours(origin, horizon_hours)]
+    except (KeyError, TypeError, ValueError, ForecastError) as exc:
+        raise ForecastError("DATA_INVALID", "Погодный ответ содержит пропуски, дубли, неверные единицы или значения.") from exc
+    _save_raw(raw, digest)
+    return {"manifest": {"turbine_id": site["turbine_id"], "run_id": f"live-best-match/{digest}",
+            "provider": "Open-Meteo Forecast / best match", "source_url": LIVE_URL,
+            "initialized_at": None, "available_at": fetched_at, "fetched_at": fetched_at,
+            "availability_basis": "response_received", "provenance_status": "live",
+            "raw_sha256": digest, "interpolation": "none", "wind_height_m": 10,
+            "wind_height_status": "proxy_not_hub_height", "grid_latitude": grid_lat,
+            "grid_longitude": grid_lon}, "rows": rows}
+
+
+def _save_raw(raw: bytes, digest: str) -> None:
+    target = artifact_dir() / "weather_raw" / f"{digest}.json"
+    temporary = None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if target.read_bytes() != raw:
+                raise OSError("existing raw response does not match checksum")
+        else:
+            with tempfile.NamedTemporaryFile(mode="wb", prefix=".weather-", suffix=".tmp",
+                                             dir=target.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Exclusive publication: never overwrite a concurrent writer's artifact.
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.read_bytes() != raw:
+                    raise OSError("existing raw response does not match checksum")
+    except OSError as exc:
+        raise _unavailable("Не удалось сохранить исходный ответ погоды; проверьте каталог артефактов.") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def load_sites(mode: str = "fixture") -> list[dict]:
-    if mode not in ("fixture", "archive"):
-        raise ForecastError("INVALID_INPUT", "Режим должен быть fixture или archive.")
-    return [dict(site) for site in (ARCHIVE_SITES if mode == "archive" else SITES)]
+    if mode not in ("fixture", "archive", "live"):
+        raise ForecastError("INVALID_INPUT", "Режим должен быть fixture, archive или live.")
+    return [dict(site) for site in (ARCHIVE_SITES if mode in ("archive", "live") else SITES)]
 
 
 def fetch_weather(site: dict, origin: str, horizon_hours: int, mode: str) -> dict:
-    if mode not in ("fixture", "archive"):
-        raise ForecastError("INVALID_INPUT", "Режим должен быть fixture или archive.")
-    if not isinstance(site, dict) or site not in (ARCHIVE_SITES if mode == "archive" else SITES):
+    if mode not in ("fixture", "archive", "live"):
+        raise ForecastError("INVALID_INPUT", "Режим должен быть fixture, archive или live.")
+    if not isinstance(site, dict) or site not in (ARCHIVE_SITES if mode in ("archive", "live") else SITES):
         raise ForecastError("INVALID_INPUT", "Выберите зарегистрированную турбину для указанного режима.")
     if type(horizon_hours) is not int or horizon_hours not in (24, 48):
         raise ForecastError("INVALID_INPUT", "Горизонт должен составлять 24 или 48 часов.")
@@ -208,6 +293,10 @@ def fetch_weather(site: dict, origin: str, horizon_hours: int, mode: str) -> dic
         raise ForecastError("INVALID_INPUT", "Укажите начало прогноза по целому часу UTC.")
     if mode == "archive":
         return _archive_weather(site, origin, horizon_hours)
+    if mode == "live":
+        if origin != next_live_origin():
+            raise ForecastError("INVALID_INPUT", "Для текущей погоды допустим только ближайший будущий час UTC; создайте прогноз заново.")
+        return _live_weather(site, origin, horizon_hours)
     name = {"2026-01-31T18:00:00Z": "r1", "2026-02-01T18:00:00Z": "r2"}.get(origin)
     if name is None:
         raise ForecastError("WEATHER_UNAVAILABLE", "Нет демонстрационного погодного выпуска для этой даты; выберите 31 января или 1 февраля.")

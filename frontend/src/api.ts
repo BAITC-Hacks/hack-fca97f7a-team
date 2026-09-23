@@ -1,4 +1,4 @@
-import type { ApiError, Explanation, ForecastRequest, ForecastResult, Site } from './types'
+import type { ApiError, Explanation, ForecastRequest, ForecastResult, Site, WeatherMode } from './types'
 
 export class ApiFailure extends Error {
   code: string
@@ -18,18 +18,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     body = await response.json()
   } catch {
-    throw new Error(`Server returned ${response.status} without a JSON response.`)
+    throw new Error(`Сервер вернул ответ ${response.status} без JSON.`)
   }
   if (!response.ok || (body && typeof body === 'object' && 'status' in body && body.status === 'error')) {
     const error = body as ApiError
-    throw new ApiFailure({ status: 'error', code: error.code || 'REQUEST_FAILED', message: error.message || `Request failed (${response.status}).`, trace: error.trace })
+    throw new ApiFailure({ status: 'error', code: error.code || 'REQUEST_FAILED', message: error.message || `Запрос не выполнен (${response.status}).`, trace: error.trace })
   }
   return body as T
 }
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-export function getSites(mode: 'fixture' | 'archive', signal?: AbortSignal): Promise<Site[]> {
+export function getSites(mode: WeatherMode, signal?: AbortSignal): Promise<Site[]> {
   return request<{ sites: Site[] }>(`/sites?mode=${encodeURIComponent(mode)}`, { signal }).then((body) => body.sites)
 }
 

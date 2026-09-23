@@ -23,7 +23,7 @@ class ForecastRequest(TypedDict):
     turbine_id: str
     origin: str
     horizon_hours: int
-    mode: Literal["fixture", "archive"]
+    mode: Literal["fixture", "archive", "live"]
 
 
 class WeatherRow(TypedDict):
@@ -72,6 +72,16 @@ def utc_time(value: str) -> datetime:
         raise ForecastError("INVALID_INPUT", "Укажите корректное время UTC (например, 2026-01-31T18:00:00Z).") from exc
 
 
+def utc_now() -> datetime:
+    """Injectable UTC clock for request receipt and weather availability."""
+    return datetime.now(timezone.utc)
+
+
+def next_live_origin(now: datetime | None = None) -> str:
+    current = now if now is not None else utc_now()
+    return iso(current.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+
+
 def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -83,8 +93,8 @@ def validate_request(request: dict) -> ForecastRequest:
         raise ForecastError("INVALID_INPUT", "Выберите зарегистрированную турбину T1 или T2.")
     if type(request["horizon_hours"]) is not int or request["horizon_hours"] not in (24, 48):
         raise ForecastError("INVALID_INPUT", "Выберите горизонт 24 или 48 часов.")
-    if request["mode"] not in ("fixture", "archive"):
-        raise ForecastError("INVALID_INPUT", "Выберите режим fixture или archive.")
+    if request["mode"] not in ("fixture", "archive", "live"):
+        raise ForecastError("INVALID_INPUT", "Выберите режим fixture, archive или live.")
     origin = utc_time(request["origin"])
     if origin.minute or origin.second or origin.microsecond:
         raise ForecastError("INVALID_INPUT", "Укажите начало прогноза по целому часу UTC.")

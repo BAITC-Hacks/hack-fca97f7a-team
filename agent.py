@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import math
+
+import contracts
 from collections import OrderedDict
 from threading import RLock
 
@@ -21,7 +23,7 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
     if not isinstance(bundle, dict) or not isinstance(bundle.get("manifest"), dict) or not isinstance(bundle.get("rows"), list):
         raise ForecastError("DATA_INVALID", "Погодные данные имеют неверный формат; повторите запрос.")
     manifest, rows = bundle["manifest"], bundle["rows"]
-    required = ("turbine_id", "run_id", "provider", "source_url", "initialized_at",
+    required = ("turbine_id", "run_id", "provider", "source_url",
                 "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")
     if any(not manifest.get(key) for key in required):
         raise ForecastError("DATA_INVALID", "Не хватает сведений о происхождении погодного прогноза.")
@@ -31,9 +33,17 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
         raise ForecastError("WEATHER_UNAVAILABLE", "Для архива нужен проверенный прогноз на момент выпуска.")
     if request["mode"] == "fixture" and manifest["provenance_status"] != "fixture":
         raise ForecastError("DATA_INVALID", "Для демонстрационного режима нужны помеченные синтетические данные.")
-    initialized = utc_time(manifest["initialized_at"])
+    if request["mode"] == "live":
+        if (manifest["provenance_status"] != "live" or manifest.get("initialized_at") is not None
+                or manifest.get("availability_basis") != "response_received"
+                or manifest.get("fetched_at") != manifest["available_at"]):
+            raise ForecastError("DATA_INVALID", "Текущая погода должна указывать время получения без выдуманного времени выпуска.")
+    else:
+        if not manifest.get("initialized_at"):
+            raise ForecastError("DATA_INVALID", "Не хватает времени выпуска погодного прогноза.")
+        initialized = utc_time(manifest["initialized_at"])
     available = utc_time(manifest["available_at"])
-    if initialized > available:
+    if request["mode"] != "live" and initialized > available:
         raise ForecastError("DATA_INVALID", "Время выпуска прогноза позже времени его доступности.")
     if available > utc_time(request["origin"]):
         raise ForecastError("WEATHER_UNAVAILABLE", "Прогноз погоды ещё не был доступен на указанную дату; выберите другой выпуск.")
@@ -66,6 +76,8 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
     trace: list[dict] = []
     try:
         request = validate_request(request)
+        if request["mode"] == "live" and request["origin"] != contracts.next_live_origin():
+            raise ForecastError("INVALID_INPUT", "Для текущей погоды укажите ближайший будущий час UTC; создайте прогноз заново.")
         trace.append({"step": "validate_request", "status": "ok", "detail": "registered request shape and UTC origin"})
         sites = {site["turbine_id"]: site for site in load_sites(request["mode"])}
         site = sites.get(request["turbine_id"])
@@ -77,6 +89,14 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         for attempt in (1, 2):
             try:
                 bundle = weather_tool(site, request["origin"], request["horizon_hours"], request["mode"])
+                if request["mode"] == "live" and isinstance(bundle, dict) and isinstance(bundle.get("manifest"), dict):
+                    available = utc_time(bundle["manifest"].get("available_at"))
+                    if available > utc_time(request["origin"]):
+                        if attempt == 2:
+                            raise ForecastError("WEATHER_UNAVAILABLE", "Получение погоды пересекло начало прогноза; повторите запрос.")
+                        request["origin"] = contracts.next_live_origin()
+                        trace.append({"step": "fetch_weather", "status": "retry", "detail": "origin elapsed during retrieval"})
+                        continue
                 break
             except (OSError, TimeoutError, ConnectionError) as exc:
                 trace.append({"step": "fetch_weather", "status": "retry" if attempt == 1 else "error",
@@ -107,7 +127,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("wind_height_m", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("wind_height_m", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256", "fetched_at") if key in manifest})
         identity = fingerprint({"request": request, "site": site, "model_id": metadata["model_id"],
                                 "weather": {"manifest": provenance, "rows": rows}, "model_input": model_input})
         with _CACHE_LOCK:

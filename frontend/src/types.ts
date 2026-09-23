@@ -1,4 +1,4 @@
-export type WeatherMode = 'fixture' | 'archive'
+export type WeatherMode = 'fixture' | 'archive' | 'live'
 
 export interface Site {
   turbine_id: string
@@ -10,7 +10,7 @@ export interface Site {
 
 export interface ForecastRequest {
   turbine_id: string
-  origin: string
+  origin?: string // Omitted for live; the server assigns the next UTC hourly origin.
   horizon_hours: 24 | 48
   mode: WeatherMode
 }
@@ -39,6 +39,7 @@ export interface TraceStep {
 }
 
 export interface ForecastResult extends ForecastRequest {
+  origin: string
   status: 'ok'
   forecast_id: string
   model_input: ModelInput
@@ -48,7 +49,7 @@ export interface ForecastResult extends ForecastRequest {
   fingerprint: string
   cache_hit: boolean
   train_last_interval_start: string
-  weather_provenance: Record<string, string>
+  weather_provenance: { available_at: string } & Record<string, string | number | null>
   hours: ForecastHour[]
   analysis: {
     peak_power_norm: number

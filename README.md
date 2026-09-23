@@ -8,7 +8,8 @@ The active application is a React frontend with a FastAPI backend:
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
 Both turbine models are trained from their separate real datasets. Fixture-mode
-weather and map coordinates are synthetic; archive-mode coordinates are sourced
+weather and map coordinates are synthetic; live mode fetches current Open-Meteo
+weather at organizer-supplied coordinates; archive-mode coordinates are sourced
 from the organizer but historical weather eligibility remains unverified. OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
@@ -61,13 +62,27 @@ returns a labeled local answer; it does not discard or change the forecast.
 
 ## Demo
 
-1. Select T1/T2 on the map or selector. Keep January 31, 2026 and 48 hours.
-2. Click **Predict generation**. Inspect the power chart and hourly table.
-3. Click **Inspect model input CSV** to download the exact file the predictor read.
-4. Read the explanation; its label distinguishes OpenAI from computed fallback.
-5. Ask: **Which six-hour period has the highest average output?** The window is
-   calculated locally and supplied to the explanation model.
-6. Click **Advance one day & recalculate** to compare overlapping target hours.
+1. Для воспроизводимого показа выберите «Демонстрационная погода (заглушка)»,
+   турбину T1 или T2, 31 января 2026 года и горизонт 48 часов.
+2. Нажмите **«Сформировать прогноз»**. Посмотрите график и почасовую таблицу.
+3. Нажмите **«Скачать входной CSV модели»**: это точный файл, прочитанный моделью.
+4. Прочитайте объяснение: подпись различает ответ OpenAI и расчётный вариант.
+5. Спросите: «В какие шесть часов средняя мощность максимальна?» Окно
+   вычисляется локально перед формированием ответа.
+6. Нажмите **«Перейти на день вперёд и пересчитать»**, чтобы сравнить общие часы.
+7. Для текущей погоды переключите «Источник погоды» на **«Реальный прогноз
+   Open-Meteo (сейчас)»**, выберите T1/T2 и 24 или 48 часов, затем нажмите
+   **«Сформировать прогноз»**. Дата здесь не выбирается: сервер задаёт ближайший
+   будущий целый час UTC. Этот шаг требует доступности погодного API.
+
+In **live** mode select the turbine and 24/48 hours; do not enter a date. The
+server selects the next UTC hour after receipt and returns it as `origin`. A live
+request needs network access and never falls back silently to fixtures. Open-Meteo
+Forecast API (best match, 10 m wind) is **current** weather, not proof of any
+historical as-issued run. Weather data: © Open-Meteo, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
+the free API is for noncommercial use under Open-Meteo's terms. Attribution must
+remain visible in the UI. Wind height differs from the unverified training sensor
+height and power is normalized, not a capacity forecast.
 
 Fixture weather exists only for January 31 and February 1 at 23:00 Asia/Almaty.
 Other origins return an explicit error. Archive mode lists organizer-supplied
@@ -133,7 +148,7 @@ public endpoint probes, but those retrospective queries **do not prove**
 as-issued availability at the historical origin. `OPEN_METEO_ARCHIVE_MANIFEST`
 (optional, unset by default) must point to an operator-reviewed external capture
 evidence manifest; see [CONTRACTS.md](CONTRACTS.md#weather-seam--a-owns-weatherpy)
-for exact schema and fail-closed rules. No key or new live mode is required by
+for exact schema and fail-closed rules. No key is required by
 the public endpoint. Responses must match the trusted capture's versioned canonical *full-forecast*
 SHA-256 (not volatile raw JSON bytes). Exact retrieved bytes retain a separate
 `raw_sha256` artifact checksum. Wind at 10 m from `ecmwf_ifs` is an explicit proxy; its mismatch against the
@@ -167,6 +182,8 @@ and the JavaScript error check (none).
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
-The current app is a working demo with explicit weather/location stubs, not a
-claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
+The fixture scenario uses explicit synthetic weather and locations; live mode
+uses current Open-Meteo weather and organizer-supplied coordinates. The strict
+historical archive remains unavailable without independent as-issued evidence.
+This working demo is not a claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.

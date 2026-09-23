@@ -18,7 +18,8 @@ the three developers, with ownership, priorities and acceptance criteria.
 
 ## Required flow and boundaries
 
-1. React selects a registered turbine and submits an explicit forecast origin.
+1. React selects a registered turbine and submits an explicit historical origin;
+   for `live` it omits origin and the server chooses the next whole UTC hour.
 2. `api.py` validates HTTP bodies and calls `agent.run_forecast`.
 3. `weather.py` normalizes provider output into hourly wind m/s and temperature °C.
 4. `model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
@@ -43,18 +44,24 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
   measurements. Do not fill label gaps or remove zero-power observations.
 - Freeze training at `2026-01-31T18:00:00Z`, using only completed hours. Never use
   February targets/actual weather to train, select or feed the forecasting model.
-- Predict interval starts origin+1h through origin+24/48h. Origins are explicit,
-  UTC-aware and hourly; never use today's date implicitly for historical replay.
-- Weather initialization ≤ availability ≤ origin; verify every forecast hour,
-  turbine identity and finite units before inference or cache reuse.
+- Predict interval starts origin+1h through origin+24/48h. Historical origins
+  are explicit, UTC-aware and hourly; `live` origins are assigned by the server
+  from its current clock and never substituted into historical replay.
+- For historical modes, weather initialization ≤ availability ≤ origin. Live
+  Best Match has no verified run initialization: retain `initialized_at=null`,
+  require receipt/completion time ≤ server-issued origin, and verify every
+  forecast hour, turbine identity and finite units before inference or cache reuse.
 - Archive mode requires verified as-issued forecasts. Never replace them silently
   with fixtures, reanalysis, actual weather or retrospectively generated hindcasts.
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.
 
-Weather/coordinates remain synthetic fixtures in the current app. They must be
-labeled. OpenAI is a real adapter; missing keys/failure must be labeled fallback.
-Do not claim full organizer compliance until archive weather and replay work.
+Fixture weather and coordinates remain synthetic and labeled. The separate `live`
+mode fetches current Open-Meteo forecasts at organizer-supplied coordinates;
+its origin is generated server-side and it is not a substitute for historical
+as-issued data. `archive` stays evidence-gated. OpenAI is a real adapter; missing
+keys/failure must be labeled fallback. Do not claim full organizer compliance
+until archive weather and replay work.
 
 ## Ownership and how to make changes
 

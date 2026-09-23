@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import copy
+import contracts
 import hashlib
 import os
 import re
 import threading
 from collections import OrderedDict
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -14,10 +16,10 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
 
 from agent import run_forecast
-from contracts import artifact_dir, forecast_csv
+from contracts import artifact_dir, forecast_csv, next_live_origin
 from explanation import answer_question, summarize_forecast
 from weather import load_sites
 
@@ -46,9 +48,17 @@ class ForecastBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     turbine_id: StrictStr
-    origin: StrictStr
+    origin: StrictStr | None = None
     horizon_hours: Literal[24, 48]
-    mode: Literal["fixture", "archive"]
+    mode: Literal["fixture", "archive", "live"]
+
+    @model_validator(mode="after")
+    def origin_matches_mode(self):
+        if self.mode == "live" and "origin" in self.model_fields_set:
+            raise ValueError("live origin must be omitted")
+        if self.mode != "live" and self.origin is None:
+            raise ValueError("fixture/archive origin is required")
+        return self
 
 
 class ExplanationBody(BaseModel):
@@ -87,6 +97,8 @@ def _status_for(code: str) -> int:
 
 @app.exception_handler(RequestValidationError)
 def _validation_error(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+    if any("live origin must be omitted" in str(item.get("msg", "")) for item in _exc.errors()):
+        return _error(400, "INVALID_INPUT", "Для текущего прогноза не передавайте дату; для демонстрации и архива укажите её явно.")
     return _error(422, "INVALID_INPUT", "Проверьте параметры запроса: турбину, дату, горизонт и режим.")
 
 
@@ -98,13 +110,26 @@ def health() -> dict:
 
 
 @app.get("/api/sites")
-def sites(mode: Literal["fixture", "archive"] = "fixture") -> dict:
+def sites(mode: Literal["fixture", "archive", "live"] = "fixture") -> dict:
     return {"sites": load_sites(mode)}
 
 
 @app.post("/api/forecasts")
 def create_forecast(body: ForecastBody):
-    result = run_forecast(body.model_dump())
+    request = body.model_dump(exclude_none=True)
+    received_at = contracts.utc_now() if body.mode == "live" else None
+    if received_at is not None:
+        request["origin"] = next_live_origin(received_at)
+    result = run_forecast(request)
+    # A request received just before the UTC boundary can enter the agent just
+    # after it. Reissue a fresh future origin once; never retry an old request.
+    if received_at is not None and result.get("code") == "INVALID_INPUT":
+        retry_at = contracts.utc_now()
+        refreshed = next_live_origin(retry_at)
+        if (received_at <= retry_at <= received_at + timedelta(minutes=2)
+                and refreshed > request["origin"]):
+            request["origin"] = refreshed
+            result = run_forecast(request)
     if result.get("status") != "ok":
         code = str(result.get("code", "INTERNAL_ERROR"))
         status = _status_for(code)
