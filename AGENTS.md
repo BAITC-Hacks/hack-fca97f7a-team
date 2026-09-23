@@ -78,7 +78,7 @@ extra agents or expand the current task.
 
 ## Development and verification
 
-Use Python 3.11+ in `.venv`; current workspace has Python 3.14. Run from repo root:
+Use Python 3.12+ in `.venv` (required by the pinned NumPy); current workspace has Python 3.14. Run from repo root:
 
 ```sh
 python -m venv .venv
@@ -99,6 +99,8 @@ Distinguish real browser checks from Streamlit AppTest simulation.
 No API credentials are needed for the slice. Future OpenAI keys belong only in
 server environment variables; never commit or expose them to React. NVIDIA
 credit is reserved; do not introduce a second provider without a concrete task.
+
+Commit working increments regularly, as explicitly requested by the user. Keep commits scoped and do not push unless asked.
 
 Before handoff, document actual launch/test commands, evidence, stub boundaries,
 unresolved provenance/timezone issues and the next task for each stream. Do not

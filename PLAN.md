@@ -129,7 +129,7 @@ Planning evidence: [NCEI GFS documentation](https://www.ncei.noaa.gov/products/w
 
 | CHOICE | WHY |
 |---|---|
-| Python 3.11, venv, pip | One runtime for model, orchestration, UI; straightforward local setup. |
+| Python 3.12+, venv, pip (verified on 3.14) | One runtime for model, orchestration, UI; straightforward local setup. |
 | Streamlit + folium + streamlit-folium | Clickable map, form/chart/table/download without a separate frontend build. Use st_folium marker events; keep selection in session state. |
 | OpenAI Python SDK, post-slice only | One text-summary call; first slice uses a deterministic template with the same interface. No agent framework. |
 | pandas, numpy, scikit-learn | CSV/time handling and a small CPU model; no GPU or paid inference. |
@@ -167,7 +167,7 @@ T2,fixture-r1,2026-01-31T06:00:00Z,2026-01-31T14:00:00Z,2026-01-31T19:00:00Z,7.2
 
 Comments above are explanatory, not literal CSV contents. Sites unique by turbine; history unique by `(turbine_id,timestamp)`; weather unique by `(turbine_id,run_id,valid_at)`. `timestamp`/`valid_at` mean hourly interval start. Missing required values reject a forecast; invalid training rows are excluded and counted. Use the six-sample hourly aggregation policy above. Mixed/unknown units stop real ingestion.
 
-Each weather run has `manifest.json`: `run_id`, `provider`, `source_url`, `retrieved_at`, `initialized_at`, `available_at`, `availability_basis`, `provenance_status` (`verified|unverified|fixture`), `raw_sha256`, `interpolation` (`none|linear_3h_to_1h`). Preserve raw response and source metadata. Retrieval time is not historical availability. Cache key includes coordinates, source run, variables, and interpolation policy.
+Each weather run has a manifest object (bundled with rows in `fixtures/T1-r1.json` etc. in the slice): `run_id`, `provider`, `source_url`, `retrieved_at`, `initialized_at`, `available_at`, `availability_basis`, `provenance_status` (`verified|unverified|fixture`), `raw_sha256`, `interpolation` (`none|linear_3h_to_1h`). Preserve raw response and source metadata. Retrieval time is not historical availability. Cache key includes coordinates, source run, variables, and interpolation policy.
 
 **Public Python interfaces, defined in `contracts.py`:**
 
@@ -181,7 +181,7 @@ run_forecast(request: dict) -> dict
 replay_month(mode: str, output_path: str) -> dict
 ```
 
-**Map boundary:** UI resolves marker identity to `turbine_id` from `sites.csv`; requests never accept arbitrary client-supplied coordinates. Background clicks do nothing; unsupported/missing-model sites disable Predict generation. The fixture T2 coordinate is a labeled placeholder, not a claim about the real site. Use `st_folium`'s marker event (`last_object_clicked`) matched to a configured marker, not general `last_clicked`; keep a synchronized selectbox as the asset/network fallback. Map pan/zoom must not invoke forecast or reset the selected date. Resolve authoritative coordinates once in config, not through a geocoder per click.
+**Map boundary:** UI resolves marker identity to `turbine_id` from `weather.load_sites()`; the slice uses an explicit fixture registry, while verified archive sites will come from `config/sites.csv`; requests never accept arbitrary client-supplied coordinates. Background clicks do nothing; unsupported sites disable Predict generation; a missing artifact returns MODEL_UNAVAILABLE with the training command. The fixture T2 coordinate is a labeled placeholder, not a claim about the real site. Use `st_folium`'s marker event (`last_object_clicked`) matched to a configured marker, not general `last_clicked`; keep a synchronized selectbox as the asset/network fallback. Map pan/zoom must not invoke forecast or reset the selected date. Resolve authoritative coordinates once in config, not through a geocoder per click.
 
 **Explanation boundary:** `summarize_forecast` returns `{"text":"...","backend":"template","forecast_fingerprint":"sha256:...","warning":null}`. On missing credentials/timeout/provider error in LLM mode, return template text with an explanatory `warning`; leave the forecast successful. Template is 2–3 sentences derived from peak/minimum/times/warnings in `analysis`; format times in site timezone and explicitly name normalized units and synthetic weather where applicable. For ties choose earliest hour. LLM mode may paraphrase those facts in ≤100 words, without new numbers, causal claims, or confidence estimates. One Responses API call with `max_output_tokens=300`, `reasoning={"effort":"none"}`, timeout=8 seconds, retries disabled; use `response.output_text`, falling back on empty/incomplete output. Keep the key server-side; future React code never receives it. Optional chat later receives only the current result and question; out-of-context questions get a clear limitation. Changing forecast invalidates prior explanation/chat context.
 
@@ -244,7 +244,7 @@ Keep modules flat. Preserve supplied files in place; do not blanket-ignore or re
 | Person | OWNS / SAFE TO MODIFY | SHOULD AVOID MODIFYING | FIRST TASK AFTER SLICE | DEPENDS ON |
 |---|---|---|---|---|
 | A: integration/weather | agent.py, weather.py, contracts.py, config, scripts/prefetch.py, README, dependencies | B/C modules except agreed integration fixes | Verify archive gate and coordinates; prefetch verified runs | Organizer coordinates; accessible operational archive |
-| B: data/model/replay | data.py, model.py, replay.py, scripts/train.py, test_model.py | UI, agent, weather schemas | Implement confirmed T2 mapping/aggregation; fit model; January holdout vs persistence; both-turbine replay | Raw measurements; frozen weather contract; A's caches |
+| B: data/model/replay | data.py, model.py, replay.py, scripts/train.py, test_model.py | UI, agent, weather schemas | Review both-turbine aggregation/time assumptions; improve model; January holdout vs persistence; both-turbine replay | Raw measurements; frozen weather contract; A's caches |
 | C: UI/explanation/demo | app.py, explanation.py, test_ui.py, test_explanation.py, presentation notes | Model, weather, agent, shared contracts/dependencies | Polish marker selection; add bounded LLM explanation/fallback; render provenance and replay coverage | Slice contracts; summary API key for LLM only |
 
 Each human may use their coding agent within their files. UltraCode first creates the shared slice; then hands it off. A alone integrates shared changes. Preserve UI→agent and UI→explanation boundaries so A replaces weather/adds a thin API, B improves ingestion/model/replay, and C builds the frontend/explanation concurrently. No shared-file redesign after the handoff without coordination.
@@ -271,13 +271,13 @@ UltraCode: build the first runnable slice of the agreed map → weather → powe
 
 ### Build
 
-1. Inspect the repo and any AGENTS.md before edits; preserve supplied originals and existing work. Use Python 3.11, one Streamlit process, flat modules, local artifacts. Create the slice files listed below and freeze §9 contracts before writing consumers.
+1. Inspect the repo and any AGENTS.md before edits; preserve supplied originals and existing work. Use Python 3.12+, one Streamlit process, flat modules, local artifacts. Create the slice files listed below and freeze §9 contracts before writing consumers.
 2. Parse both exact CSV filenames and headers from §9; ignore suffixed duplicates. Convert the explicitly assumed timezone, audit ambiguous timestamps, require six ten-minute samples per hour, and average the three measurements. Save canonical data and an ingestion audit with source hash, date range, dropped hours, and time assumptions. Never create a T1 model from T2 data.
 3. Implement `train_model`/`predict_power` with the selected regressor and features. Fit only completed hours before the first origin, save an artifact/metadata, and load it for UI requests. Do not fit again on Streamlit reruns. Baseline uses the last eligible pre-test observation.
 4. Generate two deterministic synthetic weather runs per turbine covering the two demo origins, with distinct values on overlapping timestamps and manifests. Keep seed fixed. Supply an explicitly fictional coordinate if real map coordinates remain unresolved; use separate fixture config. Synthetic weather must not derive from future measured weather. Weather adapter validates availability/coverage and returns the frozen bundle. Archive mode returns a useful WEATHER_UNAVAILABLE error until A implements it.
 5. Implement `run_forecast`: request validation → eligible weather → feature validation → prediction → peak/minimum/bounds checks → result/trace. Build content fingerprints from normalized weather, request, and model identity. Use deterministic JSON serialization and exclude retrieval wall-clock time from content identity. Repeated identical inputs reuse computation; a new eligible weather input recomputes. Emit traces from actual execution, not canned success strings.
 6. Implement `summarize_forecast` in template mode using computed peak/minimum/times and provenance. It must produce useful text from any valid result, not a hardcoded demo paragraph. Leave the LLM implementation behind this boundary for C; `backend=llm` in the slice falls back explicitly to template with a warning. No SDK/key needed yet.
-7. Implement the Folium map in Streamlit with a clickable T1/T2 markers, synchronized fallback site selector, origin and 24/48-hour controls. Start with no selected site; enable Predict generation after valid selection. Clicks on the background cannot change site identity. Show active site and coordinate provenance. Use session state/stable component key so map redraws preserve inputs and do not start work.
+7. Implement the Folium map in Streamlit with clickable T1/T2 markers, synchronized fallback site selector, origin and 24/48-hour controls. Start with no selected site; enable Predict generation after valid selection. Clicks on the background cannot change site identity. Show active site and coordinate provenance. Use session state/stable component key so map redraws preserve inputs and do not start work.
 8. On Predict generation, display the chart/table, baseline, weather inputs, source/run times, trace, units, fixture label and CSV download, then call the summary adapter. On Advance one day, update origin and rerun; compare overlapping hours. Clear or visibly mark old output stale as soon as request controls change; never show old results as current success.
 9. Add focused tests, run them, start the app, and exercise both demo runs. Document exact setup commands and any browser verification that could not be performed. Update README with limitations and A/B/C handoff. Stop after the slice; do not implement full archive retrieval, replay, or chat.
 
@@ -291,11 +291,11 @@ Implement §9 verbatim, including template summary response and site-identity ma
 
 ### Required Files
 
-`requirements.txt`, `.gitignore`, `contracts.py`, `app.py`, `agent.py`, `weather.py`, `model.py`, `data.py`, `explanation.py`, `scripts/make_fixtures.py`, `scripts/train.py`, focused tests, and updated `README.md`. Include `scripts/__init__.py` for CLI module invocation. Generate fixture site/weather CSV/manifests, small test-only measurement data, `data/canonical/history.csv`, ingestion audit, and model artifacts; ignore generated artifacts. Existing supplied files stay untouched. The later owners add `replay.py`, `scripts/prefetch.py`, and confirmed real-site config; do not require those for startup.
+`requirements.txt`, `.gitignore`, `contracts.py`, `app.py`, `agent.py`, `weather.py`, `model.py`, `data.py`, `explanation.py`, `scripts/make_fixtures.py`, `scripts/train.py`, focused tests, and updated `README.md`. Include `scripts/__init__.py` for CLI module invocation. Generate weather JSON bundles (manifest plus rows) and small test-only measurement data; fixture sites are defined in weather.py. Generate `data/canonical/history.csv`, ingestion audit, and model artifacts; ignore generated artifacts. Existing supplied files stay untouched. The later owners add `replay.py`, `scripts/prefetch.py`, and confirmed real-site config; do not require those for startup.
 
 ### Acceptance Tests
 
-- From repository root: `python3.11 -m venv .venv`, activate it, then `python -m pip install -r requirements.txt`. If 3.11 is unavailable, report it and use an installed compatible Python 3.11+ without changing architecture.
+- From repository root: `python -m venv .venv` with Python 3.12+, activate it, then `python -m pip install -r requirements.txt`. The current slice is verified on Python 3.14.4; the pinned NumPy requires Python 3.12+.
 - `python -m scripts.make_fixtures`; `python -m scripts.train --mode fixture`; `DATA_MODE=fixture SUMMARY_BACKEND=template python -m streamlit run app.py`. Open `http://localhost:8501`; no external weather/LLM credentials required.
 - UI: initially no prediction; click T2 marker, choose `2026-01-31T18:00:00Z` (23:00 local), horizon 48, and Predict generation. Real weather-tool invocation is recorded; result has exactly 48 unique next-hour rows with finite values in [0,1]. Chart/table/CSV agree; explanation matches computed peak/minimum; provenance identifies real training and synthetic weather.
 - Repeat unchanged input: same forecast fingerprint/numbers, cache hit. Advance one day: new run/fingerprint, changed overlap, new explanation fingerprint. Pan map: no forecast invocation. Background click: no invented site. Both T1/T2 requests succeed with distinct model identities; unknown-site requests fail.
@@ -309,7 +309,7 @@ After tests and smoke run, summarize commands, working behavior, actual test evi
 
 ## 14. Definition of Done
 
-**Slice complete:** §13 checks pass and developers can work independently against §9.
+**Slice complete:** implemented with real separately trained T1/T2 models, four synthetic weather bundles, map/UI, computed analysis, and export. Verification and commands are recorded in README; later streams work against §9.
 
 **Hackathon MVP complete (still requires verified archived weather and full replay):** actual two-site data loaded; verified operational forecasts acquired automatically by coordinates or replayed from their documented cache; completed-interval cutoff and availability checks enforced; both turbines replayed for all 28 origins; 2,688 forecast rows exported with provenance; February coverage checked; optional truth metrics honestly labeled; marker selection, explanation, and demo update work; LLM explanation demonstrated or template-only limitation explicitly recorded; fresh-start README includes data placement, normalization/timezone assumptions, source attribution, limitations, and commands below.
 
