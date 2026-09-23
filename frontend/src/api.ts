@@ -36,7 +36,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-export function getSites(mode: 'fixture' | 'archive', signal?: AbortSignal): Promise<Site[]> {
+export function getSites(mode: 'fixture' | 'archive' | 'live', signal?: AbortSignal): Promise<Site[]> {
   return request<{ sites: Site[] }>(`/sites?mode=${encodeURIComponent(mode)}`, { signal }).then((body) => body.sites)
 }
 

@@ -39,7 +39,7 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
 }
 
 export default function App() {
-  const [mode, setMode] = useState<WeatherMode>('fixture')
+  const [mode, setMode] = useState<WeatherMode>('live')
   const [sites, setSites] = useState<Site[]>([])
   const [siteId, setSiteId] = useState('')
   const [date, setDate] = useState(FIRST_DATE)
@@ -88,7 +88,7 @@ export default function App() {
     const controller = new AbortController()
     forecastController.current = controller
     setLoading(true)
-    const input: ForecastRequest = { turbine_id: next.siteId, origin: originForDate(next.date), horizon_hours: next.horizon, mode: next.mode }
+    const input: ForecastRequest = { turbine_id: next.siteId, origin: next.mode === 'live' ? new Date().toISOString() : originForDate(next.date), horizon_hours: next.horizon, mode: next.mode }
     try {
       const forecast = await createForecast(input, controller.signal)
       if (epoch !== requestEpoch.current) return
@@ -155,7 +155,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="page-header">
       <div><h1>{ru.pageTitle}</h1><p>{ru.pageSubtitle}</p></div>
-      <span className="mode-badge"><i />{mode === 'fixture' ? ru.fixture : ru.archive}</span>
+      <span className="mode-badge"><i />{mode === 'live' ? ru.live : mode === 'fixture' ? ru.fixture : ru.archive}</span>
     </header>
     <main className="workspace">
       <aside className="setup-column" aria-label={ru.selectForecast}>
@@ -166,15 +166,15 @@ export default function App() {
           {selectedSite && <div className="site-meta"><span>{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.latitude)} · {new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.longitude)}</span><small>{coordinateLabel(selectedSite.coordinate_status)}</small>{selectedSite.coordinate_source && <a href={selectedSite.coordinate_source} target="_blank" rel="noreferrer">{ru.openMap} ↗</a>}</div>}
           {siteError && <div className="error-banner" role="alert">{siteError}</div>}
           <div className="field-grid">
-            <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>
+            {mode !== 'live' && <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>}
             <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
           </div>
-          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="fixture">{ru.fixture}</option><option value="archive">{ru.archive}</option></select></label>
-          <p className="origin-note">{date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
+          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="live">{ru.live}</option><option value="fixture">{ru.fixture}</option><option value="archive">{ru.archive}</option></select></label>
+          <p className="origin-note">{mode === 'live' ? ru.liveTime : date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
           <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? ru.calculating : ru.predict}</button>
           {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
-        <p className="scope-note">{ru.notice}</p>
+        <p className="scope-note">{mode === 'live' ? ru.liveNotice : ru.notice}</p>
       </aside>
       <div className="results-column">
         {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? ru.calculating : ru.emptyTitle}</h2><p>{loading ? ru.loadingHint : ru.emptyText}</p></section>}
@@ -219,10 +219,10 @@ export default function App() {
               <ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{statusLabel(step.status)}</span><strong>{stepLabel(step.step)}</strong><small>{traceDetail(step.step, step.detail)}</small></li>)}</ol>
             </details>
           </section>
-          <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>{ru.advance} →</button>
+          {mode !== 'live' && <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>{ru.advance} →</button>}
         </>}
       </div>
     </main>
-    <footer>{ru.footer}</footer>
+    <footer>{ru.footer} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Погода: Open-Meteo (CC BY 4.0)</a></footer>
   </div>
 }

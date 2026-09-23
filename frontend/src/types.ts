@@ -1,4 +1,4 @@
-export type WeatherMode = 'fixture' | 'archive'
+export type WeatherMode = 'fixture' | 'archive' | 'live'
 
 export interface Site {
   turbine_id: string

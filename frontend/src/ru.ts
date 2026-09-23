@@ -23,7 +23,7 @@ export const ru = {
   registeredTurbine: 'ЗАРЕГИСТРИРОВАННАЯ ТУРБИНА', coordinates: 'Координаты пользователя',
   mapHint: 'Координаты из предоставленных ссылок Google Maps.',
   turbine: 'Турбина', chooseTurbine: 'Выберите турбину', originDate: 'Дата запуска', horizon: 'Горизонт', hours24: '24 часа', hours48: '48 часов',
-  weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
+  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Настоящий прогноз Open-Meteo. Модель обучена на истории турбин; ветер 10 м — приближение. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
   calculating: 'Формируем прогноз…', predict: 'Сформировать прогноз',
   pipelineWeather: 'ПОГОДА', pipelineCsv: 'ВХОДНОЙ CSV', pipelineModel: 'МОДЕЛЬ', pipelineExplanation: 'ОБЪЯСНЕНИЕ',
   awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину, дату и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
@@ -71,7 +71,7 @@ export const stepLabel = (step: string) => ({
   load_model: 'Загрузка модели', predict_power: 'Расчёт мощности', analyze_result: 'Анализ результата', error: 'Ошибка',
 }[step] || step.replaceAll('_', ' '))
 export const provenanceLabel = (value: string) => ({
-  fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
+  live: ru.live, fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
 }[value] || value)

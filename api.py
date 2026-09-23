@@ -48,7 +48,7 @@ class ForecastBody(BaseModel):
     turbine_id: StrictStr
     origin: StrictStr
     horizon_hours: Literal[24, 48]
-    mode: Literal["fixture", "archive"]
+    mode: Literal["fixture", "archive", "live"]
 
 
 class ExplanationBody(BaseModel):
@@ -98,7 +98,7 @@ def health() -> dict:
 
 
 @app.get("/api/sites")
-def sites(mode: Literal["fixture", "archive"] = "fixture") -> dict:
+def sites(mode: Literal["fixture", "archive", "live"] = "fixture") -> dict:
     return {"sites": load_sites(mode)}
 
 

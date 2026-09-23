@@ -23,6 +23,8 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
     manifest, rows = bundle["manifest"], bundle["rows"]
     required = ("turbine_id", "run_id", "provider", "source_url", "initialized_at",
                 "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")
+    if request["mode"] == "live":
+        required = tuple(key for key in required if key != "initialized_at")
     if any(not manifest.get(key) for key in required):
         raise ForecastError("DATA_INVALID", "Не хватает сведений о происхождении погодного прогноза.")
     if manifest["turbine_id"] != site["turbine_id"]:
@@ -31,12 +33,22 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
         raise ForecastError("WEATHER_UNAVAILABLE", "Для архива нужен проверенный прогноз на момент выпуска.")
     if request["mode"] == "fixture" and manifest["provenance_status"] != "fixture":
         raise ForecastError("DATA_INVALID", "Для демонстрационного режима нужны помеченные синтетические данные.")
-    initialized = utc_time(manifest["initialized_at"])
-    available = utc_time(manifest["available_at"])
-    if initialized > available:
-        raise ForecastError("DATA_INVALID", "Время выпуска прогноза позже времени его доступности.")
-    if available > utc_time(request["origin"]):
-        raise ForecastError("WEATHER_UNAVAILABLE", "Прогноз погоды ещё не был доступен на указанную дату; выберите другой выпуск.")
+    if request["mode"] == "live":
+        from datetime import timedelta
+        retrieved = utc_time(manifest.get("retrieved_at", ""))
+        origin = utc_time(request["origin"])
+        if (manifest["provenance_status"] != "live"
+                or manifest["availability_basis"] != "live_http_retrieval"
+                or manifest["available_at"] != manifest["retrieved_at"]
+                or not origin <= retrieved < origin + timedelta(hours=1)):
+            raise ForecastError("WEATHER_UNAVAILABLE", "Время получения погоды изменилось; повторите запрос.")
+    else:
+        initialized = utc_time(manifest["initialized_at"])
+        available = utc_time(manifest["available_at"])
+        if initialized > available:
+            raise ForecastError("DATA_INVALID", "Время выпуска прогноза позже времени его доступности.")
+        if available > utc_time(request["origin"]):
+            raise ForecastError("WEATHER_UNAVAILABLE", "Прогноз погоды ещё не был доступен на указанную дату; выберите другой выпуск.")
     expected = expected_hours(request["origin"], request["horizon_hours"])
     if len(rows) != len(expected):
         raise ForecastError("DATA_INVALID", "В прогнозе погоды отсутствуют часы или есть дубликаты.")
@@ -107,7 +119,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("wind_height_m", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("retrieved_at", "wind_height_m", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
         identity = fingerprint({"request": request, "site": site, "model_id": metadata["model_id"],
                                 "weather": {"manifest": provenance, "rows": rows}, "model_input": model_input})
         with _CACHE_LOCK:
@@ -134,6 +146,8 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         minimum = min(hours, key=lambda hour: hour["power_norm"])
         warnings = (["Реальные данные обучения турбины; синтетическая погода"] if request["mode"] == "fixture"
                     else ["Ветер на высоте 10 м — приближение, не подтверждённое для датчика обучения и высоты ступицы"])
+        if request["mode"] == "live":
+            warnings.append("Текущий прогноз погоды; модель обучена до февраля 2026 года, baseline заморожен на момент обучения")
         warnings.append("Временная зона и начало интервала исходных данных требуют подтверждения")
         if clipped_count:
             warnings.append(f"Ограничено до диапазона [0,1] прогнозов: {clipped_count}")

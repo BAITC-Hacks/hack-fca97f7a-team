@@ -119,3 +119,10 @@ Commit working increments regularly as explicitly requested. Keep changes scoped
 never push unless asked. Preserve concurrent edits. Update README/CONTRACTS when
 interfaces or launch commands change. Report real checks separately from mocked
 ones and list remaining stubs accurately.
+
+## Live weather mode
+
+User explicitly requested actual current weather. React defaults to `live`;
+server chooses the current UTC hour and fetches Open-Meteo Forecast without
+archive evidence. Preserve separate fixture/archive semantics. Live provenance
+records retrieval time, not an invented initialization/publication time.

@@ -36,7 +36,7 @@ function ChartGraphic({ result, width, svgRef, exported = false }: { result: For
     <text x={left + 25} y={height - 26} fill="#475a51" fontSize={compact ? 10 : 12}>{ru.forecast}</text>
     <line x1={left + 103} x2={left + 121} y1={height - 30} y2={height - 30} stroke="#97a59f" strokeWidth={2} strokeDasharray="6 5" />
     <text x={left + 128} y={height - 26} fill="#475a51" fontSize={compact ? 10 : 12}>{ru.baseline}</text>
-    <text x={compact ? left : width - right} y={compact ? height - 7 : height - 26} fill="#687772" fontSize={compact ? 9 : 12} textAnchor={compact ? 'start' : 'end'}>{result.weather_provenance.provenance_status === 'fixture' ? ru.fixture : ru.archive}</text>
+    <text x={compact ? left : width - right} y={compact ? height - 7 : height - 26} fill="#687772" fontSize={compact ? 9 : 12} textAnchor={compact ? 'start' : 'end'}>{result.mode === 'live' ? ru.live : result.weather_provenance.provenance_status === 'fixture' ? ru.fixture : ru.archive}</text>
   </svg>
 }
 

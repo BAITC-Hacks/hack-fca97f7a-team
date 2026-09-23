@@ -261,3 +261,21 @@ pickle files remain readable only when no new registry exists; retraining migrat
 Metadata retains `train_origin` and `features` alongside `train_cutoff` and
 `feature_names`. `predict_power_csv` returns raw finite predictions so the agent
 retains ownership of clipping/counts. The independent diagnostic helper may clip.
+
+## Current live weather
+
+`mode=live` is supported by HTTP, core and React, and is the UI default.
+The server replaces request origin with its current UTC hour; output remains
+origin+1h through origin+24/48h. Historical dates are not used in this mode.
+`weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
+coordinates, best_match, wind_speed_10m and temperature_2m, m/s, °C, UTC,
+three forecast days. Exact hourly coverage/units/finite values are validated
+using the same parser as archive. Raw bytes and SHA-256 are saved before CSV inference.
+There is no synthetic fallback on provider failure.
+
+Live provenance is `live`, `availability_basis=live_http_retrieval`, and
+`retrieved_at=available_at` records actual retrieval. `initialized_at=null`: the
+provider run initialization is unknown, not fabricated. Live retrieval must occur
+within the current origin hour; archive retains its stricter as-issued chronology.
+Weather wind height is a 10 m proxy, model training remains frozen, and baseline
+is the last training observation rather than a current persistence forecast.
