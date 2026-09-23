@@ -179,15 +179,15 @@ def _render_result(result: dict, summary: dict) -> None:
     if frame.empty:
         st.error("The successful result contains no hourly predictions.")
         return
-    chart = frame.set_index("valid_at")[["power_norm", "baseline_norm"]].rename(
-        columns={"power_norm": "Forecast", "baseline_norm": "Persistence baseline"}
+    chart = frame.set_index("valid_at")[["power_norm"]].rename(
+        columns={"power_norm": "Forecast"}
     )
     st.markdown("**Hourly normalized power**")
     st.line_chart(chart, height=260)
     st.markdown("**Hourly weather and output**")
     display_columns = [
         column for column in (
-            "valid_at", "lead_hour", "wind_speed_ms", "temperature_c", "power_norm", "baseline_norm"
+            "valid_at", "lead_hour", "wind_speed_ms", "temperature_c", "power_norm"
         ) if column in frame.columns
     ]
     st.dataframe(frame[display_columns], hide_index=True, use_container_width=True)

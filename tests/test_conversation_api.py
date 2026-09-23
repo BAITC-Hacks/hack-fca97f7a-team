@@ -8,22 +8,32 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api
+import forecast_store
 
 
 @pytest.fixture
-def dialog(monkeypatch):
+def dialog(monkeypatch, tmp_path):
+    monkeypatch.setattr(forecast_store, "artifact_dir", lambda: tmp_path)
     start = datetime(2026, 2, 1, tzinfo=timezone.utc)
     hours = [{
         "valid_at": (start + timedelta(hours=i)).isoformat().replace("+00:00", "Z"),
+        "lead_hour": i + 1,
         "power_norm": 0.8 if 4 <= i < 8 else 0.2,
         "wind_speed_ms": 8.0 if 4 <= i < 8 else 3.0,
         "temperature_c": -2.0 if 4 <= i < 8 else 1.0,
     } for i in range(24)]
     result = {"status": "ok", "fingerprint": "sha256:" + "a" * 64,
               "turbine_id": "T1", "timezone": "Asia/Almaty", "hours": hours,
+              "origin": "2026-01-31T23:00:00Z", "horizon_hours": 24, "mode": "fixture",
+              "run_id": "test-run", "model_id": "test-model", "trace": [],
+              "train_last_interval_start": "2026-01-31T17:00:00Z",
+              "model_input": {"schema_version": "weather-features-v1", "sha256": "d" * 64,
+                              "filename": "d" * 64 + ".csv", "row_count": 24,
+                              "columns": ["turbine_id", "valid_at", "wind_speed_ms", "temperature_c"]},
               "weather_provenance": {"provenance_status": "fixture"},
               "analysis": {"peak_at": hours[4]["valid_at"], "peak_power_norm": 0.8,
-                           "min_at": hours[0]["valid_at"], "min_power_norm": 0.2, "warnings": []}}
+                           "min_at": hours[0]["valid_at"], "min_power_norm": 0.2,
+                           "clipped_count": 0, "warnings": []}}
     other = deepcopy(result)
     other.update(fingerprint="sha256:" + "b" * 64, turbine_id="T2")
     monkeypatch.setattr(api, "_FORECASTS", OrderedDict([("a" * 64, result), ("b" * 64, other)]))
@@ -106,8 +116,9 @@ def test_conversations_do_not_cross_forecasts_and_evict_explicitly(dialog, monke
     assert evicted.status_code == 404 and evicted.json()["code"] == "CONVERSATION_NOT_FOUND"
 
 
-def test_forecast_eviction_removes_its_conversations(dialog, monkeypatch):
+def test_forecast_memory_eviction_restores_disk_result_and_keeps_dialog(dialog, monkeypatch):
     client, url, result = dialog
+    forecast_store.save("a" * 64, result)
     first = client.post(url, json={"question": "Когда лучше?"}).json()
     token = first["conversation_id"]
     monkeypatch.setattr(api, "_MAX_FORECASTS", 1)
@@ -116,9 +127,27 @@ def test_forecast_eviction_removes_its_conversations(dialog, monkeypatch):
     created = client.post("/api/forecasts", json={"turbine_id": "T1", "horizon_hours": 24,
                                                 "mode": "fixture", "origin": "2026-01-31T18:00:00Z"})
     assert created.status_code == 200
-    assert token not in api._CONVERSATIONS
-    gone = client.post(url, json={"question": "А там?", "conversation_id": token})
-    assert gone.status_code == 404 and gone.json()["code"] == "NOT_FOUND"
+    assert "a" * 64 not in api._FORECASTS
+    assert token in api._CONVERSATIONS
+    restored = client.post(url, json={"question": "Найди лучшие четыре часа подряд", "conversation_id": token})
+    assert restored.status_code == 200
+    assert restored.json()["selection"]["start"] == "2026-02-01T04:00:00Z"
+    assert len(api._CONVERSATIONS[token].messages) == 4
+    # A process restart loses dialog state, but the forecast remains available.
+    api._FORECASTS.clear()
+    api._CONVERSATIONS.clear()
+    expired = client.post(url, json={"question": "А там?", "conversation_id": token})
+    assert expired.status_code == 404 and expired.json()["code"] == "CONVERSATION_NOT_FOUND"
+    fresh = client.post(url, json={"question": "Найди лучшие четыре часа подряд"})
+    assert fresh.status_code == 200 and fresh.json()["conversation_id"] != token
+
+
+def test_missing_forecast_cannot_be_recovered_from_dialog_history(dialog):
+    client, url, _ = dialog
+    first = client.post(url, json={"question": "Когда лучше?"}).json()
+    api._FORECASTS.clear()
+    response = client.post(url, json={"question": "А там?", "conversation_id": first["conversation_id"]})
+    assert response.status_code == 404 and response.json()["code"] == "NOT_FOUND"
 
 
 def test_overlapping_questions_do_not_race_history(dialog, monkeypatch):

@@ -23,14 +23,17 @@ export const ru = {
   registeredTurbine: 'ЗАРЕГИСТРИРОВАННАЯ ТУРБИНА', coordinates: 'Координаты пользователя',
   mapHint: 'Координаты из предоставленных ссылок Google Maps.',
   turbine: 'Турбина', chooseTurbine: 'Выберите турбину', originDate: 'Дата запуска', horizon: 'Горизонт', hours24: '24 часа', hours48: '48 часов',
-  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Настоящий прогноз Open-Meteo. Модель обучена на истории турбин; ветер 10 м — приближение. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
+  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Текущий прогноз Open-Meteo ECMWF IFS. Модель обучена на погоде этого источника и измеренной мощности. Точность на 24–48 часов пока не подтверждена. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
   calculating: 'Формируем прогноз…', predict: 'Сформировать прогноз',
+  refreshWeather: 'Обновить погоду и прогноз', refreshingWeather: 'Обновляем погоду…',
+  weatherProvider: 'Источник погоды', weatherProviderUnknown: 'Не указан', weatherRetrieved: 'Погода получена', weatherRetrievalUnknown: 'Время получения не указано',
+  cachedWeather: 'Погода из кеша',
   pipelineWeather: 'ПОГОДА', pipelineCsv: 'ВХОДНОЙ CSV', pipelineModel: 'МОДЕЛЬ', pipelineExplanation: 'ОБЪЯСНЕНИЕ',
   awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину, дату и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
   result: '02 / РЕЗУЛЬТАТ ПРОГНОЗА', ready: '● ГОТОВО',
   meanPower: 'Средняя мощность', peakPower: 'Максимум', lowestPower: 'Минимум', normalized: 'нормализованная мощность',
   chart: 'Почасовая нормализованная мощность', forecast: 'Прогноз',
-  chartAria: 'Почасовой прогноз нормализованной мощности и базовый прогноз',
+  chartAria: 'Почасовой прогноз нормализованной мощности',
   downloadForecast: 'Скачать прогноз CSV', downloadInput: 'Скачать входной CSV', modelInput: 'Входные данные модели', rows: 'строк',
   analysis: '03 / АНАЛИЗ', analysisTitle: 'Анализ и чат', aiExplanation: 'Объяснение ИИ', computedExplanation: 'Расчётное объяснение — ИИ недоступен',
   explanationLoading: 'Готовим объяснение…', explanationUnavailable: 'Не удалось получить объяснение',
@@ -39,7 +42,7 @@ export const ru = {
   comparison: 'Сравнение запусков', whatChanged: 'Что изменилось?', inspectOverlap: 'Посмотреть совпадающие часы',
   localHour: 'Местный час', previous: 'Ранее', current: 'Сейчас', change: 'Изменение',
   hourlyData: 'Почасовые данные', lead: 'Шаг', wind: 'Ветер, м/с', temperature: 'Температура, °C', power: 'Мощность',
-  provenance: 'Происхождение данных и этапы расчёта', steps: 'этапов', weatherRun: 'Запуск погоды', model: 'Модель', trainingCutoff: 'Конец обучения', cached: 'Результат из кеша', yes: 'Да', no: 'Нет',
+  provenance: 'Происхождение данных и этапы расчёта', steps: 'этапов', weatherRun: 'Запуск погоды', model: 'Модель', modelProfile: 'Профиль модели', profileEcmwf: 'Модель по данным Open-Meteo ECMWF IFS, ветер 10 м', profileMeasured: 'Модель по измерениям турбины', trainingWeather: 'Погода при обучении', retrospectiveTrainingWeather: 'Ретроспективный прогноз погоды', forecastAccuracy: 'Точность прогноза подтверждена', notVerified: 'Нет, не проверена', notSpecified: 'Не указано', trainingCutoff: 'Конец обучения', cached: 'Результат из кеша', yes: 'Да', no: 'Нет',
   advance: 'Следующий день и новый прогноз', footer: 'Время указано в часовом поясе Asia/Almaty. Доступны демонстрационные запуски 31 января и 1 февраля 2026 года.',
   noSites: 'Нет доступных зарегистрированных турбин.', noArchiveSites: 'Список турбин для архивного режима недоступен.',
   incompleteForecast: 'Ответ сервера не содержит полного прогноза.', staleExplanation: 'Объяснение относится к другому прогнозу.', staleAnswer: 'Ответ относится к другому прогнозу.', requestFailed: 'Не удалось завершить запрос.',
@@ -63,6 +66,10 @@ const fields: Record<string, string> = {
   initialized_at: 'Время выпуска', available_at: 'Время доступности', availability_basis: 'Основание доступности',
   retrieved_at: 'Время получения', provenance_status: 'Статус происхождения', raw_sha256: 'Контрольная сумма источника', interpolation: 'Интерполяция',
   coordinate_status: 'Статус координат',
+  weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
+  temperature_height_m: 'Высота температуры, м', wind_height_status: 'Смысл высоты ветра',
+  grid_latitude: 'Широта погодной сетки', grid_longitude: 'Долгота погодной сетки',
+  forecast_sha256: 'Контрольная сумма погодного прогноза',
 }
 export const fieldLabel = (key: string) => fields[key] || key.replaceAll('_', ' ')
 export const statusLabel = (status: string) => ({ ok: 'ГОТОВО', cached: 'ИЗ КЕША', retry: 'ПОВТОР', error: 'ОШИБКА' }[status] || status)
@@ -75,7 +82,12 @@ export const provenanceLabel = (value: string) => ({
   live: ru.live, fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
+  provider_feature_not_sensor_measurement: 'Признак погодного провайдера; не измерение датчика турбины',
+  live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS', user_provided: ru.coordinates,
 }[value] || value)
+export const weatherProviderLabel = (value?: string) => value?.startsWith('Open-Meteo Forecast')
+  ? 'Open-Meteo · ECMWF IFS'
+  : value?.startsWith('Open-Meteo Single Runs') ? 'Open-Meteo · ECMWF IFS (архив)' : value || ru.weatherProviderUnknown
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')
 export function provenanceValue(key: string, value: string, zone: string): string {
   if (key.endsWith('_at') && !Number.isNaN(Date.parse(value))) return localTime(value, zone)
@@ -113,4 +125,5 @@ export const apiErrors: Record<string, string> = {
   EXPLANATION_FAILED: 'Не удалось подготовить объяснение. Числовой прогноз доступен ниже.',
   HTTP_ERROR: 'Запрос не выполнен. Повторите попытку.',
   REQUEST_FAILED: 'Не удалось выполнить запрос. Повторите попытку.',
+  REFRESH_FAILED: 'Не удалось обновить погоду. Повторите попытку.',
 }

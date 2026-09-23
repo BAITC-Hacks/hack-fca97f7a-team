@@ -1,3 +1,8 @@
+> Current scope: the user removed historical archive/replay from the demo requirements.
+> The UI offers live weather and explicit synthetic fixtures only. Existing archive
+> utilities are optional internal tooling, not a demo dependency or delivery blocker.
+> Historical references below do not expand the current scope.
+
 # Hackathon Plan
 
 ## 1. Problem
@@ -20,8 +25,9 @@ This supersedes the earlier Streamlit-first implementation brief.
 - Freeze models before January 31, 2026 18:00 UTC (23:00 local), using completed
   hours only. Forecast starts at origin+1h, February 1 midnight local.
 - Real numeric coordinates and T1/T2 mapping were supplied by the user through
-  Google Maps (see CONTRACTS.md). Weather remains a labeled fixture; archived
-  weather provenance is still unavailable.
+  Google Maps (see CONTRACTS.md). Live uses real Open-Meteo ECMWF IFS and a
+  separately trained provider model. Fixtures remain synthetic; verified
+  as-issued weather provenance is still unavailable.
 
 ## 3. Primary Demo
 
@@ -127,7 +133,7 @@ AGENTS.md / PLAN.md / CONTRACTS.md / README.md
 frontend/src/       React UI, api.ts transport, types.ts DTOs
 api.py              FastAPI, validation, result store, downloads
 agent.py            orchestration, chronology, cache, numeric analysis
-weather.py          weather/site adapter (fixtures currently)
+weather.py          live ECMWF IFS, fixture and verified archive adapters
 model_input.py      canonical CSV writer/reader and schema version
 model.py / data.py  local fitting/inference and measurement ingestion
 explanation.py      bounded OpenAI explanation and scoped questions
@@ -164,6 +170,12 @@ B improves model/CSV schema and adds replay, C improves UI/prose. Preserve the
 working demo while completing real archive requirements.
 
 ## 14. Definition of Done
+
+**Model improvement, September 23:** provider-specific training and chronological
+checks implemented; details and remaining errors in [FORECASTING_REPORT.md](FORECASTING_REPORT.md).
+Retrospective stitched-weather diagnostics improve MAE by about 51%; this is not
+verified 24/48-hour forecasting skill. The real live path was checked for both
+turbines and horizons with input CSV checksum validation.
 
 **Current slice:** both turbines predict from actual input CSVs, React/FastAPI
 flow works, OpenAI adapter is wired, fallback is honest, errors/downloads tested,

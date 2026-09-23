@@ -56,6 +56,41 @@ def test_summary_discloses_timezone_and_wind_limitation():
     assert "синтетические" not in text
 
 
+def test_experimental_weather_model_is_disclosed_in_summary_and_answers():
+    result = forecast()
+    result["weather_provenance"] = {"provenance_status": "live", "wind_height_m": 10}
+    result["model_provenance"] = {
+        "profile": "open_meteo_ecmwf_ifs_10m",
+        "training_weather_kind": "retrospective_stitched_forecast",
+        "forecast_accuracy_verified": False, "weather_model": "ecmwf_ifs", "wind_height_m": 10,
+    }
+    result["model_context"].update({"profile": "open_meteo_ecmwf_ifs_10m",
+                                     "training_source": "supplied turbine measurements"})
+    for text in (summarize_forecast(result)["text"],
+                 answer_question(result, "Лучшие четыре часа подряд", backend="template")["text"],
+                 answer_question(result, "На каких данных обучена модель?", backend="template")["text"]):
+        assert "экспериментальная" in text
+        assert "ретроспективно полученные" in text
+        assert "ecmwf_ifs" in text
+        assert "не подтверждена" in text
+
+
+def test_experimental_model_facts_reach_llm_context(monkeypatch):
+    explanation._CACHE.clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
+    result = forecast()
+    result["model_provenance"] = {"profile": "open_meteo_ecmwf_ifs_10m",
+                                  "training_weather_kind": "retrospective_stitched_forecast",
+                                  "forecast_accuracy_verified": False, "weather_model": "ecmwf_ifs", "wind_height_m": 10}
+    calls = client(monkeypatch, [response(text="Модель экспериментальная; её точность не подтверждена.")])
+    answer = answer_question(result, "Какие ограничения у прогноза?")
+    assert answer["backend"] == "llm"
+    context = json.loads(calls[0]["input"][0]["content"])
+    assert context["model_provenance"] == result["model_provenance"]
+    assert "forecast_accuracy_verified=false" in calls[0]["instructions"]
+    assert "ретроспективно полученные" in answer["text"]
+
+
 def test_validation_is_russian():
     with pytest.raises(ValueError, match="успешно рассчитанный"):
         summarize_forecast({"status": "error"})

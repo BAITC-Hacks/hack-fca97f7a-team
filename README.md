@@ -7,8 +7,13 @@ The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
-Both turbine models are trained from their separate real datasets. Fixture-mode weather is synthetic; all modes use user-supplied turbine coordinates.
-Live mode fetches current Open-Meteo weather; historical archive eligibility remains unverified. OpenAI explanation and forecast
+Both turbine models are trained from their separate real datasets. Live weather
+uses Open-Meteo ECMWF IFS and a separate model trained on that provider's historical
+forecast features. This model is experimental: the historical series stitches
+short leads and does not establish 24/48-hour forecast accuracy. Fixture mode
+keeps synthetic weather and the original measured-weather model. Coordinates come
+from the user's Google Maps links. See [forecast analysis](FORECASTING_REPORT.md).
+OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
@@ -22,6 +27,8 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 python -m scripts.make_fixtures
 python -m scripts.train --mode fixture
+python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
+python -m scripts.train_forecast --activate
 npm --prefix frontend ci
 npm --prefix frontend run build
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
@@ -37,6 +44,13 @@ npm --prefix frontend run dev
 ```
 
 Open http://localhost:5173; Vite proxies `/api` to FastAPI.
+
+The weather download is public and cached locally with source checksums. Subsequent
+runs reuse verified cache; `--cache-only` forbids network access. Provider training
+uses only completed hours through January 31, 2026 18:00 UTC and activates only
+after chronological improvement checks. Without its artifacts, live/archive
+return `MODEL_UNAVAILABLE`; fixture mode still works after the first training command.
+Numeric evaluation and per-hour errors are under `artifacts/forecast_evaluation/`.
 
 ## OpenAI configuration
 
@@ -78,40 +92,47 @@ returns a labeled local answer; it does not discard or change the forecast.
 In **live** mode select the turbine and 24/48 hours; do not enter a date. The
 server selects the next UTC hour after receipt and returns it as `origin`. A live
 request needs network access and never falls back silently to fixtures. Open-Meteo
-Forecast API (best match, 10 m wind) is **current** weather, not proof of any
+Forecast API (fixed ECMWF IFS, 10 m wind) is **current** weather, not proof of any
 historical as-issued run. Weather data: © Open-Meteo, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
 the free API is for noncommercial use under Open-Meteo's terms. Attribution must
 remain visible in the UI. Wind height differs from the unverified training sensor
 height and power is normalized, not a capacity forecast.
 
-1. Откройте приложение. Слева — карта с координатами пользователя и параметры, справа — прогноз, под ним — анализ и чат. Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty. Погода остаётся демонстрационной.
+1. Откройте приложение. Для реального текущего прогноза оставьте режим «Настоящая погода · сейчас», выберите T1 и 48 часов. Для воспроизводимого демо выберите «Демонстрационная погода» и дату 31.01.2026; только в этом режиме погода синтетическая.
 2. Нажмите **«Сформировать прогноз»**. Покажите график нормализованной мощности и раздел «Почасовые данные». Числовой результат появляется до объяснения.
 3. Нажмите **«Скачать прогноз CSV»** в панели результата. Под графиком доступны **PNG** (2200 × 840) и **SVG** с датой, турбиной, часовым поясом и легендой. В разделе **«Данные и метод расчёта»** нажмите **«Скачать входной CSV»** — это точный файл, прочитанный моделью.
 4. Покажите пометку «Объяснение ИИ» или «Расчётное объяснение — ИИ недоступен». Пройдите диалог: **«Найди лучшие четыре часа подряд» → «А какой там ветер?» → «Сравни с последующими четырьмя часами»**. Средние значения и таблицу вычисляет сервер по выбранному периоду.
-5. Нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
-6. Для проверки ошибок выберите «Проверенный архив» и нажмите «Сформировать прогноз»: появится сообщение о недоступной погоде. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
+5. В демонстрационном режиме нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
+6. В режиме текущей погоды нажмите **«Обновить погоду»** и проверьте время получения.
 
 Сохранённая демонстрационная погода доступна только для 31 января и 1 февраля,
 23:00 Asia/Almaty. Карта загружает тайлы из сети; турбину всегда можно выбрать
-из списка. Режим архива заработает после подключения проверенной архивной
-погоды. Повторный запуск сервера удаляет сохранённые ID прогнозов; сформируйте
-прогноз заново.
+из списка. Сохранённые прогнозы доступны после перезапуска до семи дней
+в пределах лимита 256 результатов.
 
 Диалог хранится на сервере: последние 10 сообщений и выбранный период связаны с
 ID прогноза и отдельным токеном разговора. Новый прогноз, даже с теми же параметрами,
-начинает новый разговор. После вытеснения диалога чат предложит повторить вопрос.
+начинает новый разговор. После вытеснения диалога или перезапуска чат предложит
+повторить вопрос; сам прогноз восстанавливается с диска в пределах срока хранения.
 Доступны лучшие/худшие N часов (отдельные либо подряд), средняя мощность за период,
 ветер и температура по часам, сравнение периодов и поиск резких изменений мощности.
 На «Когда лучше?» следует уточнение о длительности. Для МВт·ч нужна неизвестная
 номинальная мощность установки. Контекст обучения берётся из метаданных модели;
 совпадение падения ветра и мощности не выдаётся за доказанную физическую причину.
 
-Проверка памяти и инструментов: 160 Python-тестов и сборка React прошли.
+Проверка памяти и инструментов до слияния с обновлённой main: 160 Python-тестов и сборка React прошли.
 Диалог из трёх вопросов дополнительно пройден через API с локальной моделью T1
 и синтетической погодой на 48 часов. Вызовы инструментов OpenAI проверены моками
 SDK. В браузере с моками API проверены передача токена, таблицы, истечение диалога,
 повторный прогноз с тем же ID и игнорирование запоздавшего ответа. Новых платных
 вызовов OpenAI и запросов реальной погоды в этой проверке не было.
+
+После интеграции `main` (`5511005`) в `dev-a`: 199 Python-тестов и сборка React
+прошли. Диалог сохраняется при вытеснении прогноза из оперативной памяти и его
+восстановлении с диска; после перезапуска сервера начинается новый разговор.
+Браузерная проверка с моками API охватила чат, таблицы, смену прогноза, обновление
+погоды, индикатор кеша и сведения о профиле модели. Сохранены серверное назначение
+следующего целого UTC-часа и проверки реального времени получения погоды.
 
 ## The module seams
 
@@ -139,7 +160,8 @@ The HTTP download rechecks integrity. A trace shows CSV creation and prediction.
 
 Predictions are stored server-side under a forecast ID; summary/question endpoints
 accept that ID rather than client-authored predictions. In-memory stores retain
-64 forecasts, so a server restart/eviction requires generating the forecast again.
+64 forecasts, backed by checked local JSON (latest 256, up to seven days), so
+a restart/eviction can restore the forecast by ID.
 Use one worker for this local demo. No database, queues or distributed services.
 
 ## Data and assumptions
@@ -215,15 +237,11 @@ No JavaScript errors or paid OpenAI requests occurred.
 
 ## Remaining work
 
-- Verify as-issued archived weather access for the user-supplied turbine coordinates.
-- Implement February replay over all 28 daily origins and both turbines.
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
-The fixture scenario uses explicit synthetic weather at user-supplied locations;
-live mode uses current Open-Meteo weather at those locations. The strict
-historical archive remains unavailable without independent as-issued evidence.
-This working demo is not a claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
+The current app uses real live weather plus an explicit synthetic demo mode and user-supplied coordinates, not a
+claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.
 
 ## Интеграция MLmodel
@@ -273,6 +291,26 @@ python -m scripts.smoke_model --models-dir artifacts/models
 следующего полного часа. Ключ Open-Meteo и архивный реестр не нужны.
 Ошибка провайдера показывается явно; синтетической подмены нет.
 
-Демонстрационная погода и исторический архив остаются отдельными режимами.
+Демонстрационная погода доступна отдельным режимом.
 Ветер на 10 м — приближение; модель обучена до февраля 2026, качество текущего
 прогноза ещё не оценено. Источник: https://open-meteo.com/ (CC BY 4.0).
+
+## Проверенная устойчивость демо
+
+- Погода кешируется на пять минут; видны источник, время получения и отметка кеша.
+  Кнопка «Обновить погоду» очищает кеш выбранной турбины и повторяет расчёт.
+- При переходе UTC-часа выполняется один безопасный повтор.
+- Прогнозы сохраняются локально с контрольной суммой: до 256 результатов на семь
+  дней. CSV и объяснение работают по прежнему ID после перезапуска.
+- Baseline удалён из пользовательских результатов, CSV и контекста объяснения.
+  Он остаётся только в диагностике моделей.
+- Проверка демо: [DEMO_CHECKLIST.md](DEMO_CHECKLIST.md).
+  Согласование веток: [TEAM_WORKFLOW.md](TEAM_WORKFLOW.md).
+
+Проверено: **155 тестов**, сборка React, Chromium 390/1280 px с моками API
+(горизонты 24/48, CSV/PNG/SVG, обновление погоды, ошибки, запоздалые ответы).
+Отдельно настоящий Open-Meteo подтвердил повторное использование кеша и обход
+кеша по кнопке/API. После реального перезапуска проверены оба CSV и объяснение
+по сохранённому ID. Новых платных вызовов OpenAI не было.
+
+Исторический архив и февральский replay исключены из объёма текущего демо.

@@ -29,11 +29,18 @@ def payload(origin=ORIGIN):
 
 
 @pytest.fixture
-def mocked(monkeypatch, tmp_path):
+def mocked(monkeypatch, tmp_path, provider_model_factory):
     monkeypatch.setattr(contracts, "utc_now", lambda: NOW)
     monkeypatch.setattr(weather, "utc_now", lambda: NOW)
     shutil.copytree(Path(__file__).resolve().parents[1] / "artifacts" / "models", tmp_path / "models")
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
+    models = {}
+    def load(turbine, *, profile):
+        assert profile == "open_meteo_ecmwf_ifs_10m"
+        if turbine not in models:
+            models[turbine] = provider_model_factory(turbine)
+        return models[turbine]
+    monkeypatch.setattr(agent, "load_model", load)
     calls = []
 
     def get(url, *, params, timeout, follow_redirects):
@@ -62,16 +69,19 @@ def test_live_sites_and_full_csv_inference(mocked):
             provenance = result["weather_provenance"]
             assert provenance["initialized_at"] is None
             assert provenance["available_at"] == provenance["fetched_at"]
+            assert provenance["retrieved_at"] == provenance["fetched_at"]
             assert provenance["provenance_status"] == "live"
             assert provenance["run_id"].startswith("live-best-match/")
+            assert result["model_provenance"]["forecast_accuracy_verified"] is False
             raw = (directory / "weather_raw" / (provenance["raw_sha256"] + ".json")).read_bytes()
             assert hashlib.sha256(raw).hexdigest() == provenance["raw_sha256"]
             download = client.get(f"/api/forecasts/{result['forecast_id']}/download?kind=model-input")
             assert download.status_code == 200
             assert len(download.text.splitlines()) == horizon + 1
-    assert len(calls) == 4
+    assert len(calls) == 2  # second horizon reuses each turbine's recent response
     assert all(url == weather.LIVE_URL and params["forecast_hours"] == 72 and
-               params["wind_speed_unit"] == "ms" and timeout == 8 and not redirects
+               params["wind_speed_unit"] == "ms" and params["models"] == "ecmwf_ifs"
+               and timeout == 8 and not redirects
                for url, params, timeout, redirects in calls)
 
 
@@ -195,10 +205,14 @@ def test_second_crossing_fails_without_backdating(mocked, monkeypatch):
     assert len(mocked[0]) == 2
 
 
-def test_live_rejects_false_initialization_or_availability(mocked):
+@pytest.mark.parametrize("missing", [False, True])
+def test_live_rejects_false_or_missing_initialization(mocked, missing):
     def bad(site, origin, horizon, mode):
         bundle = weather.fetch_weather(site, origin, horizon, mode)
-        bundle["manifest"]["initialized_at"] = ORIGIN
+        if missing:
+            bundle["manifest"].pop("initialized_at")
+        else:
+            bundle["manifest"]["initialized_at"] = ORIGIN
         return bundle
     result = agent.run_forecast({"turbine_id": "T1", "origin": ORIGIN,
                                  "horizon_hours": 24, "mode": "live"}, weather_tool=bad)

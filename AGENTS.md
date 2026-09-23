@@ -1,3 +1,8 @@
+> Current scope: the user removed historical archive/replay from the demo requirements.
+> The UI offers live weather and explicit synthetic fixtures only. Existing archive
+> utilities are optional internal tooling, not a demo dependency or delivery blocker.
+> Historical references below do not expand the current scope.
+
 # Working agreement
 
 ## Current task and source of truth
@@ -48,7 +53,7 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
   are explicit, UTC-aware and hourly; `live` origins are assigned by the server
   from its current clock and never substituted into historical replay.
 - For historical modes, weather initialization ≤ availability ≤ origin. Live
-  Best Match has no verified run initialization: retain `initialized_at=null`,
+  ECMWF forecasts have no verified run initialization: retain `initialized_at=null`,
   require receipt/completion time ≤ server-issued origin, and verify every
   forecast hour, turbine identity and finite units before inference or cache reuse.
 - Archive mode requires verified as-issued forecasts. Never replace them silently
@@ -56,12 +61,13 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.
 
-Fixture weather is synthetic and labeled; all three modes use the user's mapped
-T1/T2 coordinates (`coordinate_status=user_provided`) and source links in
-CONTRACTS.md. The separate `live` mode fetches current Open-Meteo forecasts;
-its origin is generated server-side and it is not historical as-issued evidence.
-`archive` stays evidence-gated. OpenAI failures use a labeled fallback. Do not
-claim full organizer compliance until archive weather and replay work.
+Fixture weather remains synthetic and must be labeled. Live uses real ECMWF IFS
+forecasts and a separate provider-trained model; see FORECASTING_REPORT.md for
+the retrospective training protocol and its unverified 24/48-hour skill. Coordinates for T1/T2 were supplied
+and mapped by the user through Google Maps; retain `coordinate_status=user_provided`
+and the source links (see CONTRACTS.md). OpenAI is a real adapter; missing
+keys/failure must be labeled fallback.
+Do not claim full organizer compliance until archive weather and replay work.
 
 ## Ownership and how to make changes
 
@@ -86,7 +92,8 @@ Train through CLI, not in requests. Load only locally generated model artifacts.
 Keep HTTP errors structured. Never return provider exception details or keys.
 Clear stale result/analysis/question state when input changes. Reject client-supplied
 predictions in explanation requests; use server-stored forecast IDs. In-memory
-stores are bounded; a restart/eviction returns 404 and the client regenerates.
+stores are bounded; restart/eviction restores checked JSON from artifacts/forecasts.
+Disk retention is 256 files / seven days; missing/expired/corrupt records return 404.
 
 ## Development
 
@@ -98,6 +105,8 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 python -m scripts.make_fixtures
 python -m scripts.train --mode fixture
+python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
+python -m scripts.train_forecast --activate
 npm --prefix frontend ci
 npm --prefix frontend run build
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
@@ -128,6 +137,23 @@ ones and list remaining stubs accurately.
 ## Live weather mode
 
 User explicitly requested actual current weather. React defaults to `live`;
-server chooses the current UTC hour and fetches Open-Meteo Forecast without
+server chooses the next whole UTC hour and fetches fixed ECMWF IFS from Open-Meteo Forecast without
 archive evidence. Preserve separate fixture/archive semantics. Live provenance
 records retrieval time, not an invented initialization/publication time.
+
+Real-weather inference uses `open_meteo_ecmwf_ifs_10m` model profile; fixture uses
+`measured`. Never silently fall back across profiles. Retrospective Historical
+Forecast training cache is not an archive attestation. Preserve CSV raw feature
+semantics and the explicit experimental/accuracy-unverified labels.
+
+## Demo resilience and handoff
+
+Live HTTP payloads are cached for five minutes (maximum eight entries). Show the
+original retrieved_at and weather_cache_hit; POST /api/weather/refresh clears the
+selected turbine before an explicit refresh. A UTC-hour crossing retries once,
+then fails clearly. Preserve archive chronology. No baseline in user forecasts,
+CSV or explanation inputs; evaluation baselines remain internal.
+
+Follow TEAM_WORKFLOW.md for branch integration and DEMO_CHECKLIST.md for browser
+checks and replay commands. scripts/replay writes a full forecast.csv only when
+all 56 verified archive runs succeed; never mark partial/fixture replay complete.

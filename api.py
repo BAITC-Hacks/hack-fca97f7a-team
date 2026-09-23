@@ -24,7 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, m
 from agent import run_forecast
 from contracts import artifact_dir, forecast_csv, next_live_origin
 from explanation import answer_question, summarize_forecast
-from weather import load_sites
+from forecast_store import load as load_forecast, save as save_forecast
+from weather import clear_live_weather_cache, load_sites
 
 ROOT = Path(__file__).resolve().parent
 try:
@@ -57,7 +58,7 @@ class Conversation:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-# Both stores use the same lock so forecast eviction also removes its dialogs.
+# Dialogs stay in RAM; forecasts can be restored from the bounded disk store.
 _CONVERSATIONS: OrderedDict[str, Conversation] = OrderedDict()
 
 
@@ -97,6 +98,12 @@ class QuestionBody(ExplanationBody):
         return value
 
 
+class WeatherRefreshBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    turbine_id: Literal["T1", "T2"]
+
+
 def _error(status: int, code: str, message: str, trace: list | None = None) -> JSONResponse:
     return JSONResponse(status_code=status, content={
         "status": "error", "code": code, "message": message, "trace": trace or []
@@ -132,6 +139,33 @@ def sites(mode: Literal["fixture", "archive", "live"] = "fixture") -> dict:
     return {"sites": load_sites(mode)}
 
 
+@app.post("/api/weather/refresh")
+def refresh_weather(body: WeatherRefreshBody) -> dict:
+    clear_live_weather_cache(body.turbine_id)
+    return {"status": "ok"}
+
+
+def _public_result(result: dict) -> dict:
+    public = copy.deepcopy(result)
+
+    def strip_baseline(value):
+        if isinstance(value, dict):
+            value.pop("baseline_norm", None)
+            for child in value.values():
+                strip_baseline(child)
+        elif isinstance(value, list):
+            for child in value:
+                strip_baseline(child)
+
+    strip_baseline(public)
+    analysis = public.get("analysis")
+    if isinstance(analysis, dict) and isinstance(analysis.get("warnings"), list):
+        analysis["warnings"] = [warning for warning in analysis["warnings"]
+                                if not (isinstance(warning, str) and
+                                        ("baseline" in warning.lower() or "базов" in warning.lower()))]
+    return public
+
+
 @app.post("/api/forecasts")
 def create_forecast(body: ForecastBody):
     request = body.model_dump(exclude_none=True)
@@ -162,16 +196,17 @@ def create_forecast(body: ForecastBody):
     forecast_id = fingerprint.removeprefix("sha256:")
     if not re.fullmatch(r"[0-9a-f]{64}", forecast_id):
         return _error(500, "INTERNAL_ERROR", "Неверный идентификатор прогноза; создайте прогноз заново.", result.get("trace"))
-    stored = copy.deepcopy(result)
+    stored = _public_result(result)
+    try:
+        save_forecast(forecast_id, stored)
+    except (OSError, ValueError, TypeError, OverflowError):
+        return _error(500, "INTERNAL_ERROR", "Не удалось сохранить прогноз; повторите попытку.")
     with _FORECASTS_LOCK:
         _FORECASTS[forecast_id] = stored
         _FORECASTS.move_to_end(forecast_id)
         while len(_FORECASTS) > _MAX_FORECASTS:
-            evicted_id, _ = _FORECASTS.popitem(last=False)
-            for token, conversation in list(_CONVERSATIONS.items()):
-                if conversation.forecast_id == evicted_id:
-                    del _CONVERSATIONS[token]
-    return {**copy.deepcopy(result), "forecast_id": forecast_id}
+            _FORECASTS.popitem(last=False)
+    return {**copy.deepcopy(stored), "forecast_id": forecast_id}
 
 
 def _get_forecast(forecast_id: str) -> dict:
@@ -183,7 +218,16 @@ def _get_forecast(forecast_id: str) -> dict:
         result = _FORECASTS.get(forecast_id)
         if result is not None:
             _FORECASTS.move_to_end(forecast_id)
-            return copy.deepcopy(result)
+            return _public_result(result)
+    result = load_forecast(forecast_id)
+    if result is not None:
+        result = _public_result(result)
+        with _FORECASTS_LOCK:
+            _FORECASTS[forecast_id] = result
+            _FORECASTS.move_to_end(forecast_id)
+            while len(_FORECASTS) > _MAX_FORECASTS:
+                _FORECASTS.popitem(last=False)
+        return copy.deepcopy(result)
     raise HTTPException(status_code=404, detail={
         "status": "error", "code": "NOT_FOUND", "message": "Прогноз не найден; создайте его заново.", "trace": []
     })
@@ -263,8 +307,6 @@ def ask_forecast(forecast_id: str, body: QuestionBody):
                                  history=copy.deepcopy(conversation.messages),
                                  selection=copy.deepcopy(conversation.selection))
         with _FORECASTS_LOCK:
-            if forecast_id not in _FORECASTS:
-                return _error(404, "NOT_FOUND", "Прогноз не найден; создайте его заново.")
             if _CONVERSATIONS.get(token) is not conversation:
                 return _error(404, "CONVERSATION_NOT_FOUND", "Диалог не найден для этого прогноза; начните новый разговор.")
             conversation.messages.extend([
