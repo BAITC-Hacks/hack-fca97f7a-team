@@ -1,11 +1,11 @@
 # Hackathon task board
 
-The architect fills this board on `dev` before parallel implementation starts. Keep task files in this folder and link them here. Assign one owner per task, record dependencies, and put the core demo path first.
+The architect/integrator fills [`DEMO_SPEC.md`](DEMO_SPEC.md) and this board on `dev` before parallel implementation starts. Keep task files in this folder and link them here. Assign one owner and allowed paths per task, record dependencies, and put the core demo path first.
 
 | ID | Task | Owner | Status | Depends on |
 | --- | --- | --- | --- | --- |
 
-No tasks have been scoped yet. The architect replaces this line with task rows after the team chooses the demo flow.
+No tasks have been scoped yet. The architect/integrator replaces this line with task rows after the team chooses the demo flow.
 
 ## Task file template
 
@@ -22,7 +22,7 @@ Depends on: none
 What the user can do.
 
 ## Scope and interfaces
-Files, API/data contracts, and work excluded from this task.
+Allowed paths, API/data contracts, dependencies, and work excluded from this task. Escalate contract changes to the humans before editing shared schemas.
 
 ## Acceptance check
 Command or manual steps, with expected result.
