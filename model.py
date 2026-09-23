@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import pickle
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -62,6 +63,17 @@ def predict_power(model: PowerModel, weather_rows: list[dict]) -> list[float]:
         return model.estimator.predict(features).tolist()
 
 
+def predict_power_csv(model: PowerModel, csv_path: Path, *, turbine_id: str, origin: str,
+                      horizon_hours: int, expected_sha256: str) -> list[float]:
+    """Primary inference interface. Predictions are computed from the actual CSV file."""
+    from model_input import read_model_input
+    if model.metadata["turbine_id"] != turbine_id:
+        raise ForecastError("MODEL_UNAVAILABLE", "Input CSV turbine does not match the fitted model.")
+    rows = read_model_input(csv_path, turbine_id=turbine_id, origin=origin,
+                            horizon_hours=horizon_hours, expected_sha256=expected_sha256)
+    return predict_power(model, rows)
+
+
 def save_model(model: PowerModel) -> None:
     directory = artifact_dir() / "models"
     directory.mkdir(parents=True, exist_ok=True)
@@ -82,4 +94,3 @@ def load_model(turbine_id: str) -> PowerModel:
     if not isinstance(fitted, PowerModel) or fitted.metadata["turbine_id"] != turbine_id:
         raise ForecastError("MODEL_UNAVAILABLE", "Model artifact does not match the selected turbine.")
     return fitted
-

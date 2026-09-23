@@ -22,10 +22,12 @@ def model_loader(site):
 @pytest.fixture
 def predictions(monkeypatch):
     calls = []
-    def predict(model, rows):
+    def predict(model, path, **kwargs):
+        from model_input import read_model_input
+        rows = read_model_input(path, **kwargs)
         calls.append(len(rows))
         return [-0.2, 1.2] + [0.5] * (len(rows) - 2)
-    monkeypatch.setattr(agent, "predict_power", predict)
+    monkeypatch.setattr(agent, "predict_power_csv", predict)
     agent._CACHE.clear()
     yield calls
     agent._CACHE.clear()
