@@ -1,0 +1,265 @@
+{
+  "aggregation_policy": "six distinct ten-minute intervals per complete hour; arithmetic mean",
+  "artifact_schema_version": 1,
+  "artifact_sha256": "5d79efad9778db4942e8095ba2950e9f4958c0178687f8deab1478460be16e99",
+  "baseline_interval_start": "2026-01-31T17:00:00Z",
+  "baseline_norm": 0.016666666666666666,
+  "canonical_sha256": "cdc7a521ae2dbace534c56c24a9d5ec7ccf64d600bf5083620de9d89feb06eb5",
+  "estimator": "HistGradientBoostingRegressor",
+  "feature_distribution": {
+    "temperature_c": {
+      "max": 40.6,
+      "min": -19.7,
+      "p01": -11.2,
+      "p99": 36.39799999999995
+    },
+    "wind_speed_ms": {
+      "max": 14.24,
+      "min": 0.0,
+      "p01": 0.22,
+      "p99": 8.539799999999994
+    }
+  },
+  "feature_names": [
+    "wind_speed_ms",
+    "temperature_c"
+  ],
+  "feature_units": {
+    "temperature_c": "degC",
+    "wind_speed_ms": "m/s"
+  },
+  "features": [
+    "wind_speed_ms",
+    "temperature_c"
+  ],
+  "implementation": "hourly-hgbr-v1",
+  "interval_semantics": "source timestamps are ten-minute interval starts; hourly timestamps are starts",
+  "library_versions": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "scikit_learn": "1.9.1"
+  },
+  "model_id": "sha256:594ab96b14faef987df918ca088c7784f8964e26a17075bcc4a009b6d23b8b96",
+  "parameters": {
+    "early_stopping": false,
+    "l2_regularization": 10,
+    "learning_rate": 0.05,
+    "loss": "absolute_error",
+    "max_iter": 200,
+    "max_leaf_nodes": 7,
+    "min_samples_leaf": 80,
+    "random_state": 42
+  },
+  "params": {
+    "early_stopping": false,
+    "l2_regularization": 10,
+    "learning_rate": 0.05,
+    "loss": "absolute_error",
+    "max_iter": 200,
+    "max_leaf_nodes": 7,
+    "min_samples_leaf": 80,
+    "random_state": 42
+  },
+  "profile": "open_meteo_ecmwf_ifs_10m",
+  "python_version": "3.14.4",
+  "recipe": "absolute",
+  "sklearn_version": "1.9.1",
+  "source_sha256": "c4c341582fb2dd348b7187f0128cff265fe055f469413871ebb5db50eef58b5b",
+  "target": "power_norm",
+  "target_unit": "normalized_fraction",
+  "timezone_assumption": "Asia/Almaty",
+  "train_cutoff": "2026-01-31T18:00:00Z",
+  "train_last_interval_start": "2026-01-31T17:00:00Z",
+  "train_origin": "2026-01-31T18:00:00Z",
+  "training_rows": 16603,
+  "training_source": "retrospective Open-Meteo forecast features aligned to supplied turbine power",
+  "turbine_id": "T1",
+  "validation": {
+    "confirmation": {
+      "monthly": [
+        {
+          "candidate": {
+            "absolute_error_p90": 0.44329524007645554,
+            "bias": -0.043619433475224775,
+            "mae": 0.15441396137408722,
+            "mean_prediction": 0.35637362208033074,
+            "mean_truth": 0.3999930555555556,
+            "r2": 0.5986114159088529,
+            "rmse": 0.23858356675852696
+          },
+          "clipped_predictions": 0,
+          "end": "2025-12-01",
+          "excluded_hours": 0,
+          "hours": 720,
+          "legacy_on_provider_weather": {
+            "absolute_error_p90": 0.8248681406651459,
+            "bias": -0.33244095123090095,
+            "mae": 0.3338254704761113,
+            "mean_prediction": 0.06755210432465455,
+            "mean_truth": 0.3999930555555556,
+            "r2": -0.49711663465853384,
+            "rmse": 0.4607717415088342
+          },
+          "start": "2025-11-01",
+          "training_last_hour": "2025-10-31T23:00:00Z",
+          "training_mean_baseline": {
+            "absolute_error_p90": 0.6153863241929884,
+            "bias": -0.02704604641521077,
+            "mae": 0.3347620632303598,
+            "mean_prediction": 0.3729470091403448,
+            "mean_truth": 0.3999930555555556,
+            "r2": -0.005158121179881903,
+            "rmse": 0.3775506406611616
+          },
+          "training_rows": 14405
+        },
+        {
+          "candidate": {
+            "absolute_error_p90": 0.49011286602312354,
+            "bias": 0.008105822416126089,
+            "mae": 0.17261202369363426,
+            "mean_prediction": 0.4571778944881982,
+            "mean_truth": 0.44907207207207206,
+            "r2": 0.5333620283933564,
+            "rmse": 0.2610606692258984
+          },
+          "clipped_predictions": 10,
+          "end": "2026-01-01",
+          "excluded_hours": 4,
+          "hours": 740,
+          "legacy_on_provider_weather": {
+            "absolute_error_p90": 0.8742404384232467,
+            "bias": -0.37862670271574006,
+            "mae": 0.38098542462805546,
+            "mean_prediction": 0.07044536935633201,
+            "mean_truth": 0.44907207207207206,
+            "r2": -0.7464099876145189,
+            "rmse": 0.5050385301709013
+          },
+          "start": "2025-12-01",
+          "training_last_hour": "2025-11-30T23:00:00Z",
+          "training_mean_baseline": {
+            "absolute_error_p90": 0.6157655096418732,
+            "bias": -0.07483758171394532,
+            "mae": 0.3440590559154195,
+            "mean_prediction": 0.37423449035812684,
+            "mean_truth": 0.44907207207207206,
+            "r2": -0.03834746611455797,
+            "rmse": 0.389424044417311
+          },
+          "training_rows": 15125
+        },
+        {
+          "candidate": {
+            "absolute_error_p90": 0.4029517032582553,
+            "bias": 0.04205495951823113,
+            "mae": 0.1592289365034142,
+            "mean_prediction": 0.3565784464197668,
+            "mean_truth": 0.31452348690153564,
+            "r2": 0.5172992966612748,
+            "rmse": 0.233708409515575
+          },
+          "clipped_predictions": 2,
+          "end": "2026-01-31T18:00:00Z",
+          "excluded_hours": 0,
+          "hours": 738,
+          "legacy_on_provider_weather": {
+            "absolute_error_p90": 0.7824738410926857,
+            "bias": -0.27657561352997884,
+            "mae": 0.27798143673850706,
+            "mean_prediction": 0.037947873371556834,
+            "mean_truth": 0.31452348690153564,
+            "r2": -0.4803208466471218,
+            "rmse": 0.40927319480707586
+          },
+          "start": "2026-01-01",
+          "training_last_hour": "2025-12-31T23:00:00Z",
+          "training_mean_baseline": {
+            "absolute_error_p90": 0.5577748187834858,
+            "bias": 0.06320169431497864,
+            "mae": 0.30317761382099584,
+            "mean_prediction": 0.3777251812165144,
+            "mean_truth": 0.31452348690153564,
+            "r2": -0.03530097445953562,
+            "rmse": 0.34226988225197486
+          },
+          "training_rows": 15865
+        }
+      ],
+      "pooled": {
+        "candidate": {
+          "absolute_error_p90": 0.44631584911585825,
+          "bias": 0.0025609083758990157,
+          "mae": 0.16215737254874968,
+          "mean_prediction": 0.3903801379785681,
+          "mean_truth": 0.387819229602669,
+          "r2": 0.56169923225001,
+          "rmse": 0.24480608590168934
+        },
+        "legacy_on_provider_weather": {
+          "absolute_error_p90": 0.8471098880929521,
+          "bias": -0.3292329607283989,
+          "mae": 0.330952617507088,
+          "mean_prediction": 0.05858626887427021,
+          "mean_truth": 0.387819229602669,
+          "r2": -0.5479864964001966,
+          "rmse": 0.46006551208921553
+        },
+        "training_mean_baseline": {
+          "absolute_error_p90": 0.6110416037396698,
+          "bias": -0.01283444653449366,
+          "mae": 0.3272872911297382,
+          "mean_prediction": 0.3749847830681754,
+          "mean_truth": 0.387819229602669,
+          "r2": -0.0025661233785048143,
+          "rmse": 0.3702479029454911
+        }
+      },
+      "promotion_gate": true,
+      "segments": {
+        "high_power_ge_0.7": {
+          "absolute_error_p90": 0.5421129888372401,
+          "bias": -0.14681792122304624,
+          "hours": 593,
+          "mae": 0.1730410621986432,
+          "mean_prediction": 0.7767037201485109,
+          "mean_truth": 0.923521641371557,
+          "r2": -9.208070394548661,
+          "rmse": 0.27039054181128835
+        },
+        "low_power_lt_0.1": {
+          "absolute_error_p90": 0.2409782929310594,
+          "bias": 0.07616469502589665,
+          "hours": 763,
+          "mae": 0.08635969430173612,
+          "mean_prediction": 0.10298208253135756,
+          "mean_truth": 0.0268173875054609,
+          "r2": -44.571907789601006,
+          "rmse": 0.16962236887479284
+        },
+        "medium_power": {
+          "absolute_error_p90": 0.46467632879063897,
+          "bias": 0.041066795238400615,
+          "hours": 842,
+          "mae": 0.22317827580300686,
+          "mean_prediction": 0.37873504543634207,
+          "mean_truth": 0.3376682501979415,
+          "r2": -1.7584230595992825,
+          "rmse": 0.28085906940555244
+        }
+      }
+    },
+    "forecast_accuracy_verified": false,
+    "kind": "chronological_provider_input_diagnostic",
+    "selected_recipe": "absolute"
+  },
+  "weather_context": {
+    "availability_verified": false,
+    "model": "ecmwf_ifs",
+    "provider": "open-meteo",
+    "temperature_height_m": 2,
+    "training_weather_kind": "retrospective_stitched_forecast",
+    "weather_csv_sha256": "bb759bfa2f451e19c177a8c89709b18b4aafcbff0ece7f65933e6a6bec031335",
+    "wind_height_m": 10
+  }
+}

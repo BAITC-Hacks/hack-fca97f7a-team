@@ -1,0 +1,18 @@
+{
+  "status": "ok",
+  "relocated_models": true,
+  "independent_model_input_directory": true,
+  "weather_source": "shared immutable original GRIB cache; all hashes and decoded points revalidated",
+  "runs": 56,
+  "checks": {
+    "forecast.csv": {
+      "identical": true,
+      "sha256": "b7c8313833e02bcc741ea19bcaa45d3549c6aedf50cffe4bbdf9c6f435af273e"
+    },
+    "daily_forecast.csv": {
+      "identical": true,
+      "sha256": "8a07f53b682ee88267a6ac48caad9bdef2c59d6ca087595a16efccd646b5b8e1"
+    }
+  },
+  "paid_llm_calls": 0
+}

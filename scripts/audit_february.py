@@ -71,7 +71,7 @@ def audit(report_dir: Path, inputs_root: Path, weather_root: Path) -> dict:
             if folder not in receipts:
                 receipts.add(folder)
                 objects = receipt["objects"]
-                check("68 исходных объектов: " + folder.name, set(objects) == {f"{s}-{p}" for s in STEPS for p in ("index", *PARAMS)}
+                check("68 частей исходных объектов: " + folder.name, set(objects) == {f"{s}-{p}" for s in STEPS for p in ("index", *PARAMS)}
                       and receipt["receipt_sha256"] == fingerprint({k: v for k, v in receipt.items() if k != "receipt_sha256"})[7:])
                 check("Хеши и сроки объектов: " + folder.name, all(
                     hashlib.sha256((folder / f"{name}.bin").read_bytes()).hexdigest() == meta["sha256"]

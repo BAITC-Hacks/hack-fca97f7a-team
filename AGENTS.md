@@ -1,4 +1,6 @@
 > Current scope: February 2026 replay is the primary Samal (React) demo.
+> Completed: 56 verified operational runs, 2688 forecast rows, 1344 February rows,
+> 289 audit checks. Primary handoff: deliverables/february_2026_operational.
 > Earlier live-only restrictions are superseded. Keep live separately.
 > Prefer verified operational ECMWF Open Data from the official public archive;
 > check each object's server timestamp before origin, GRIB identity and hashes.
@@ -106,14 +108,16 @@ Disk retention is 256 files / seven days; missing/expired/corrupt records return
 
 ## Development
 
-Python 3.12+ (verified 3.14.4), Node 22+. From repo root:
+Python 3.14 for shipped model artifacts (verified 3.14.4), Node 22+. Python 3.12+
+requires retraining rather than loading incompatible pickle artifacts. From repo root:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
-python -m scripts.train_forecast --activate
+mkdir -p artifacts
+cp -R deliverables/february_2026_operational/artifacts/models artifacts/models
+python -m scripts.fetch_operational_weather --workers 4
 npm --prefix frontend ci
 npm --prefix frontend run build
 python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
@@ -174,3 +178,10 @@ A change of date, mode, turbine or horizon clears stale results and conversation
 Historical first target is local midnight of the selected February day; live first
 target is the next full UTC hour. Never refresh historical weather with live data.
 Conversation tool tests use mocks; do not issue additional paid smoke calls.
+
+## Jury configuration exception
+
+The owner explicitly requested committing and publishing the server `.env` with
+the supplied OpenAI key to this private repository for jury testing. Preserve
+that authorized configuration; never print the key or copy it into frontend/VITE
+variables. This exception does not authorize adding unrelated secrets.

@@ -427,3 +427,19 @@ The older Open-Meteo Single Runs source remains an explicit conditional option:
 `available_at=null`, `provenance_status=provider_documented`. It cannot silently
 replace missing operational data. The operator-attested Open-Meteo adapter and
 its strict manifest gate remain unchanged for existing archive callers.
+
+Operational preparation: `python -m scripts.fetch_operational_weather` uses up to
+four isolated workers and resumes immutable per-day caches under
+`OPERATIONAL_WEATHER_DIR` (default `ARTIFACT_DIR/operational_weather`). The IFS
+00 UTC run on the issue day provides native leads 18..66 at three-hour intervals.
+The decoder validates ECMWF forecast identity, units and levels, then interpolates
+u/v and temperature to each requested hour; wind speed is computed afterwards.
+Original indexes, selected GRIB messages, byte offsets, hashes and object times
+are retained. Runtime reads the cache only and rehashes every raw dependency;
+repeated decoding is cached by an already verified receipt digest. There is no
+network or model training during replay inference.
+
+`python -m scripts.replay --weather-source operational` is now the default
+February CLI path. `verified` explicitly retains the operator-reviewed
+Open-Meteo manifest adapter; `provider-documented` retains the conditional source.
+The legacy `POST /api/forecasts` archive semantics are unchanged.

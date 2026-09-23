@@ -48,7 +48,7 @@ def test_hourly_input_interpolates_vectors_before_speed_and_converts_kelvin(monk
         values = {"2t": 273.15 + step - 18, "10u": 3 if step == 18 else -3,
                   "10v": 0, "grid_latitude": 43.75, "grid_longitude": 78.5}
         nodes[str(step)] = {site["turbine_id"]: values.copy() for site in weather.SITES}
-    receipt = {"nodes": nodes, "objects": {"mock": {"last_modified": "2026-01-31T08:00:00Z"}},
+    receipt = {"nodes": nodes, "objects": {"mock": {"last_modified": "2026-01-31T08:00:00Z", "url": weather.BASE + "/mock.grib2"}},
                "receipt_sha256": "a" * 64}
     monkeypatch.setattr(weather, "_load_receipt", lambda *args, **kwargs: receipt)
     result = weather.fetch_operational_weather(weather.SITES[0], ORIGIN, horizon)

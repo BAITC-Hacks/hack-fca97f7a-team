@@ -164,7 +164,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def _load_receipt(path: Path, origin: str, *, horizon_hours: int) -> dict:
-    if path.is_symlink():
+    if path.is_symlink() or (path / "receipt.json").is_symlink():
         raise ForecastError("WEATHER_UNAVAILABLE", "Кэш ECMWF содержит недопустимую ссылку.")
     try:
         data = json.loads((path / "receipt.json").read_text(encoding="utf-8"))
@@ -182,7 +182,10 @@ def _load_receipt(path: Path, origin: str, *, horizon_hours: int) -> dict:
         for step in STEPS:
             stem = BASE + "/" + prefix + f"{step}h-oper-fc"
             index_meta = data["objects"][f"{step}-index"]
-            index_raw = (path / f"{step}-index.bin").read_bytes()
+            index_path = path / f"{step}-index.bin"
+            if index_path.is_symlink():
+                raise ValueError("linked index")
+            index_raw = index_path.read_bytes()
             if (index_meta["url"] != stem + ".index" or _sha(index_raw) != index_meta["sha256"]
                     or not init <= utc_time(index_meta["last_modified"]) <= when):
                 raise ValueError("invalid index receipt")
@@ -253,17 +256,20 @@ def fetch_operational_weather(site: dict, origin: str, horizon_hours: int, mode:
                 "weather_model": "ecmwf_ifs", "wind_height_status": "provider_feature_not_sensor_measurement",
                 "grid_latitude": grid["grid_latitude"], "grid_longitude": grid["grid_longitude"],
                 "provider_documentation": DOC, "object_count": len(receipt["objects"]),
+                "source_object_count": len({meta["url"] for meta in receipt["objects"].values()}),
+                "index_count": len(STEPS), "field_message_count": len(STEPS) * len(PARAMS),
                 "source_kind": "operational_grib_archive",
                 "evidence": {"receipt_path": f"operational_weather/{name}/receipt.json",
                              "receipt_sha256": receipt["receipt_sha256"],
                              "object_count": len(receipt["objects"]),
+                             "source_object_count": len({meta["url"] for meta in receipt["objects"].values()}),
                              "first_object_last_modified": min(meta["last_modified"] for meta in receipt["objects"].values()),
                              "last_object_last_modified": iso(last)}}
     return {"manifest": manifest, "rows": rows}
 
 
 def prepare_operational_weather(*, days: int = 28, start_day: int = 0, root: Path | None = None,
-                                client: httpx.Client | None = None) -> dict:
+                                client: httpx.Client | None = None, cache_only: bool = False) -> dict:
     """Resumable acquisition of original index and selected GRIB messages."""
     if (type(days) is not int or type(start_day) is not int
             or not 1 <= days <= 28 or not 0 <= start_day < 28 or start_day + days > 28):
@@ -287,6 +293,9 @@ def prepare_operational_weather(*, days: int = 28, start_day: int = 0, root: Pat
                     continue
                 except ForecastError:
                     raise ForecastError("DATA_INVALID", f"Повреждён готовый архивный выпуск {origin}; ручная проверка обязательна.")
+            if cache_only:
+                failures.append({"origin": origin, "message": "Погодный выпуск отсутствует в проверенном кэше ECMWF."})
+                break
             path.mkdir(parents=True, exist_ok=True)
             objects, nodes = {}, {}
             try:

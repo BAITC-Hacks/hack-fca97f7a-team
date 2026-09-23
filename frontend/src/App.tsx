@@ -25,7 +25,7 @@ const shiftDate = (value: string, days: number) => new Date(Date.parse(`${value}
 const errorMessage = (error: unknown) => error instanceof TypeError ? 'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.' : error instanceof Error ? error.message : ru.requestFailed
 
 function savedForecastId(): string | null {
-  try { const id = localStorage.getItem(savedForecastKey) || localStorage.getItem('wind-demo:last-live-forecast-id'); return id && /^[0-9a-f]{64}$/.test(id) ? id : null }
+  try { const id = localStorage.getItem(savedForecastKey); return id && /^[0-9a-f]{64}$/.test(id) ? id : null }
   catch { return null }
 }
 function rememberForecast(id: string | null) {

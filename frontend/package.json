@@ -7,6 +7,7 @@
     "build": "tsc -b && vite build",
     "dev": "vite --host 127.0.0.1",
     "test:scene": "node --test src/experience/weather.test.mjs",
+    "test:agent": "node --test tests/agent-tools.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

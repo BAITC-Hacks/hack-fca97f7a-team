@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import csv
 import json
 import math
@@ -180,7 +181,7 @@ def package_operational_replay(report_dir: Path, output_dir: Path, *,
         manifest = {"version": 1, "kind": "operational_february_outputs_and_models",
                     "full_february_replay": True, "historical_availability_verified": True,
                     "source_weather_included": False, "weather_receipts_included": True, "full_rerun_requires_network": True,
-                    "input_to_power_reproduced": True, "runtime": _runtime(),
+                    "input_to_power_reproduced": True, "runtime": {**_runtime(), "eccodes": importlib.metadata.version("eccodes")},
                     "expected_runs": report["expected_runs"], "actual_rows": report["actual_rows"],
                     "files": files}
         (temporary / "bundle_manifest.json").write_text(

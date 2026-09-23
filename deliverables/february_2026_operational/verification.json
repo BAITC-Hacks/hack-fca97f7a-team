@@ -1,0 +1,44 @@
+{
+  "backend_targeted_tests": {
+    "passed": 44,
+    "failed": 0,
+    "scope": [
+      "API",
+      "conversation",
+      "model_input",
+      "replay",
+      "operational_weather"
+    ]
+  },
+  "frontend_tests": {
+    "passed": 17,
+    "failed": 0
+  },
+  "production_build": "passed",
+  "real_browser": {
+    "source": "ECMWF operational archive, local API",
+    "cases": [
+      "T2 February 1 / 48h",
+      "T1 February 1 / 24h",
+      "48-row table",
+      "best 4h then weather in selected period",
+      "desktop 1365px",
+      "mobile 390px"
+    ],
+    "javascript_exceptions": 0,
+    "screenshot": "docs/images/samal-february.png"
+  },
+  "paid_llm_test_calls": 0,
+  "llm_quality_live_tested": false,
+  "independent_audit": {
+    "passed": 289,
+    "failed": 0
+  },
+  "real_api_additional_cases": [
+    "T1 February 2 / 24h",
+    "T2 February 28 / 48h including March 1",
+    "all month downloads HTTP 200",
+    "server on port 8000 with llm_configured=true"
+  ],
+  "relocated_reproduction": "56 forecasts repeated from relocated models and independent input directory; both CSV byte-identical"
+}

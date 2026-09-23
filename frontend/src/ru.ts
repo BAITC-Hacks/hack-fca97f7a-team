@@ -75,9 +75,10 @@ const fields: Record<string, string> = {
   coordinate_status: 'Статус координат',
   assumed_available_by: 'Предполагаемая доступность', availability_verified: 'Доступность подтверждена',
   run_policy: 'Правило выбора выпуска', documentation_url: 'Документация поставщика',
-  forecast_date: 'Первый день прогноза', object_count: 'Число исходных объектов', provider_documentation: 'Документация источника',
+  receipt_sha256: 'Контрольная сумма реестра исходных объектов',
+  forecast_date: 'Первый день прогноза', object_count: 'Сохранённых частей источника', provider_documentation: 'Документация источника',
   grid_resolution: 'Разрешение погодной сетки', grid_resolution_degrees: 'Разрешение сетки, градусы',
-  source_step_hours: 'Исходный шаг прогноза, часы', publication_evidence: 'Подтверждение публикации',
+  source_object_count: 'Исходных объектов провайдера', index_count: 'Индексных файлов', field_message_count: 'Выбранных GRIB-полей', evidence: 'Свидетельство происхождения', source_kind: 'Вид архива', source_step_hours: 'Исходный шаг прогноза, часы', publication_evidence: 'Подтверждение публикации',
   weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
   temperature_height_m: 'Высота температуры, м', wind_height_status: 'Смысл высоты ветра',
   grid_latitude: 'Широта погодной сетки', grid_longitude: 'Долгота погодной сетки',
@@ -91,6 +92,7 @@ export const stepLabel = (step: string) => ({
   load_model: 'Загрузка модели', predict_power: 'Расчёт мощности', analyze_result: 'Анализ результата', error: 'Ошибка',
 }[step] || step.replaceAll('_', ' '))
 export const provenanceLabel = (value: string) => ({
+  operational_grib_archive: 'Архив операционных прогнозов GRIB',
   linear: 'Линейная интерполяция', linear_3h_to_hourly: 'Линейная интерполяция с 3-часового на почасовой шаг',
   s3_last_modified: 'Время публикации копии в публичном архиве',
   operational_object_last_modified: 'Время публикации операционного объекта архива',
@@ -105,7 +107,9 @@ export const provenanceLabel = (value: string) => ({
   provider_feature_not_sensor_measurement: 'Признак погодного провайдера; не измерение датчика турбины',
   live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS', user_provided: ru.coordinates,
 }[value] || value)
-export const weatherProviderLabel = (value?: string) => value?.startsWith('Open-Meteo Forecast')
+export const weatherProviderLabel = (value?: string) => value?.startsWith('ECMWF IFS operational')
+  ? 'ECMWF IFS · операционный архив (Google Cloud)'
+  : value?.startsWith('Open-Meteo Forecast')
   ? 'Open-Meteo · ECMWF IFS'
   : value?.startsWith('Open-Meteo Single Runs') ? 'Open-Meteo · ECMWF IFS (архив)' : value || ru.weatherProviderUnknown
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')

@@ -1,11 +1,30 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseUICommand, selectForecastHour, tomorrowDate, localDate, explainSelectedHour, biggestDrop } from '../src/assistant/agentTools.ts'
+import { readFile } from 'node:fs/promises'
+import ts from 'typescript'
+
+// Use the project's TypeScript compiler; no Node-specific TS build is required.
+const compiled = new Map()
+async function moduleUrl(relative, base = import.meta.url) {
+  const url = new URL(relative, base).href
+  if (compiled.has(url)) return compiled.get(url)
+  let source = ts.transpileModule(await readFile(new URL(url), 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText
+  for (const match of [...source.matchAll(/from ['"]([^'"]+)['"]/g)]) {
+    const dependency = match[1].startsWith('.') ? await moduleUrl(match[1], url) : import.meta.resolve(match[1])
+    source = source.replace(match[0], `from '${dependency}'`)
+  }
+  const output = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+  compiled.set(url, output)
+  return output
+}
+const { parseUICommand, selectForecastHour, tomorrowDate, localDate, explainSelectedHour, biggestDrop } = await import(await moduleUrl('../src/assistant/agentTools.ts'))
 
 function forecast(origin = '2026-01-31T18:00:00Z', count = 48) {
   return { origin, timezone: 'Asia/Almaty', turbine_id: 'T2', hours: Array.from({ length: count }, (_, i) => ({
     valid_at: new Date(Date.parse(origin) + (i + 1) * 3600000).toISOString(), lead_hour: i + 1,
-    wind_speed_ms: 6 + i * .1, temperature_c: -2, power_norm: .6, baseline_norm: .2,
+    wind_speed_ms: 6 + i * .1, temperature_c: -2, power_norm: .6,
   })) }
 }
 
@@ -15,11 +34,30 @@ test('A cross-turbine minimum command retains both turbine and tomorrow scope', 
   assert.equal(parseUICommand('Покажи турбину 3').turbineId, 'T3', 'unknown IDs are passed to the registered-site guard instead of silently selecting T1')
 })
 
-test('The existing six-hour question reaches the stored-result backend', () => {
-  assert.equal(parseUICommand('В какие шесть часов средняя мощность максимальна?').intent, 'question')
+test('Period statistics and follow-ups reach the stored-result backend instead of single-hour navigation', () => {
+  for (const question of [
+    'В какие шесть часов средняя мощность максимальна?',
+    'Найди лучшие 4 часа подряд',
+    'Покажи максимальную среднюю мощность за 4 часа',
+    'Покажи лучшие четыре часа подряд',
+    'Почему снизилось здесь?',
+    'Какой ветер там?',
+    'Сравни этот период со следующими четырьмя часами',
+    'Насколько точен прогноз?',
+    'Объясни график',
+    'Удали все данные и измени модель',
+  ]) assert.equal(parseUICommand(question).intent, 'question', question)
+})
+
+test('Explicit navigation retains local single-hour and panel controls', () => {
   assert.equal(parseUICommand('Покажи минимум').intent, 'minimum')
-  assert.equal(parseUICommand('Почему снизилось здесь?').intent, 'here')
-  assert.equal(parseUICommand('Удали все данные и измени модель').intent, 'question')
+  assert.equal(parseUICommand('Перейди к максимуму').intent, 'maximum')
+  assert.equal(parseUICommand('Покажи самое сильное падение').intent, 'ramp')
+  assert.equal(parseUICommand('Открой график').intent, 'analytics')
+  assert.equal(parseUICommand('Открой таблицу').intent, 'analytics')
+  assert.equal(parseUICommand('Вернись к Земле').intent, 'earth')
+  assert.equal(parseUICommand('Покажи турбину 1').intent, 'navigate')
+  assert.equal(parseUICommand('Покажи завтра').intent, 'tomorrow')
 })
 
 test('Tomorrow is measured from the forecast origin in the turbine timezone, never the device clock or selected hour', () => {
@@ -61,7 +99,7 @@ test('Here uses the selected forecast row and its preceding hour, with normalize
   assert.doesNotMatch(text, /МВт/)
 })
 
-const { daylightHour } = await import('../src/timeline/daylight.ts')
+const { daylightHour } = await import(await moduleUrl('../src/timeline/daylight.ts'))
 const site = { turbine_id: 'T2', latitude: 43.643198, longitude: 78.538828, timezone: 'Asia/Almaty' }
 
 test('Daylight shortcut chooses an existing near-noon forecast row on the selected local day', () => {
