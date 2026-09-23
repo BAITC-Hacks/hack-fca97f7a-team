@@ -2,6 +2,8 @@
 
 This repository is built by three participants and their agents. Optimize for a working demo at the end of five hours. Keep decisions and handoffs visible in Git so work can continue without waiting for a meeting.
 
+Before starting work, read `PROJECT_STATE.md` for the latest shared snapshot and `tasks/README.md` for assignments. The architect updates the state after scoping; the integrator updates it after each merge and before release. Keep it current on `dev` so another agent can resume without a verbal handoff.
+
 ## Branches and ownership
 
 - `main` is the release branch. It contains only a runnable, reviewed demo. Do not commit work in progress directly to `main`.
