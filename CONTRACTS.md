@@ -5,7 +5,7 @@ interface rather than making every module understand a new provider/model.
 
 ```text
 React (frontend/src/App.tsx)
-  → frontend/src/api.ts → FastAPI (api.py)
+  → frontend/src/api.ts → FastAPI (backend/api.py)
     → agent.run_forecast(request)
       → weather.fetch_weather(site, origin, horizon, mode)
       → validate historical availability + coverage
@@ -19,13 +19,13 @@ React (frontend/src/App.tsx)
 
 ## HTTP boundary — A owns backend, C owns frontend
 
-Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
+Backend: `backend/api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 `frontend/src/types.ts`. OpenAPI is served at `/docs` and `/openapi.json`.
 
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
-| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
+| `GET /api/sites?mode=live` | mode: live (UI); fixture/archive (internal) | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
@@ -72,7 +72,7 @@ store (64 results) backed by atomic, checksummed JSON in artifacts/forecasts.
 Restart/eviction restores a validated record. Disk retention: newest 256 files,
 maximum seven days. Missing/expired/corrupt records return 404; regenerate. This is intentionally a single-worker local demo, not distributed storage.
 
-## Weather seam — A owns `weather.py`
+## Weather seam — A owns `backend/adapters/weather.py`
 
 ```python
 load_sites(mode: str = "fixture") -> list[dict]
@@ -152,7 +152,7 @@ manufacture checksums/evidence from today's historical query and call it
 as-issued. Test malformed values, missing hours, wrong turbine and future
 publication times. Historical weather/reanalysis/stitched runs are not substitutes.
 
-## CSV seam — B owns `model_input.py`
+## CSV seam — B owns `backend/ml/model_input.py`
 
 ```python
 write_model_input(rows, turbine_id, origin, horizon_hours) -> dict
@@ -179,7 +179,7 @@ If adding model features, increment schema version and update the writer, reader
 model training feature list, weather normalization, DTO metadata and relevant
 contract tests together. Do not silently rename columns or change units.
 
-## Model seam — B owns `model.py` and `data.py`
+## Model seam — B owns `backend/ml/model.py` and `backend/ml/data.py`
 
 ```python
 train_model(history, origin, turbine_id) -> PowerModel
@@ -206,7 +206,7 @@ via `python -m scripts.train --mode fixture`. Preserve output alignment and meta
 CSV interface. Models are fitted once from separately identified turbine datasets,
 not during HTTP requests or React renders.
 
-## Orchestration seam — A owns `agent.py`
+## Orchestration seam — A owns `backend/services/agent.py`
 
 `run_forecast(request, *, weather_tool=..., model_loader=...) -> dict` stays free
 of FastAPI, Streamlit and React. It validates requests, calls tools, writes CSV,
@@ -216,10 +216,10 @@ Cache identity includes request, site, model identity, weather content/provenanc
 and CSV schema/checksum. Weather is revalidated and the CSV is ensured present
 before cached predictions are returned. Retrieval wall time is not content identity.
 
-Keep error mapping and transport in `api.py`. Keep numeric analysis in the core;
+Keep error mapping and transport in `backend/api.py`. Keep numeric analysis in the core;
 LLM prose must not overwrite predictions, uncertainty, or provenance.
 
-## Explanation seam — C owns `explanation.py`
+## Explanation seam — C owns `backend/adapters/explanation.py`
 
 ```python
 summarize_forecast(result, backend="template") -> dict
@@ -269,7 +269,7 @@ retains ownership of clipping/counts. The independent diagnostic helper may clip
 `mode=live` is supported by HTTP, core and React, and is the UI default.
 The server replaces request origin with its current UTC hour; output remains
 origin+1h through origin+24/48h. Historical dates are not used in this mode.
-`weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
+`backend/adapters/weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
 coordinates, fixed `models=ecmwf_ifs`, wind_speed_10m and temperature_2m, m/s, °C, UTC,
 three forecast days. Exact hourly coverage/units/finite values are validated
 using the same parser as archive. Raw bytes and SHA-256 are saved before CSV inference.

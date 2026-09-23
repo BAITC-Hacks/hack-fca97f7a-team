@@ -1,24 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { askQuestion, createForecast, downloadCsv, explainForecast, getSites, refreshWeather } from './api'
-import type { Explanation, ForecastRequest, ForecastResult, Site, WeatherMode } from './types'
+import type { Explanation, ForecastRequest, ForecastResult, Site } from './types'
 import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail, weatherProviderLabel } from './ru'
 import PowerChart from './PowerChart'
 import SiteMap from './SiteMap'
 import { saveBlob } from './chartExport'
-
-const FIRST_DATE = '2026-01-31'
-const LOCAL_ZONE = 'Asia/Almaty'
-
-function originForDate(date: string): string {
-  // The supported 2026 replay dates are UTC+05:00 in Asia/Almaty.
-  return `${date}T18:00:00Z`
-}
-
-function nextDate(date: string): string {
-  const day = new Date(`${date}T12:00:00Z`)
-  day.setUTCDate(day.getUTCDate() + 1)
-  return day.toISOString().slice(0, 10)
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -39,10 +25,8 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
 }
 
 export default function App() {
-  const [mode, setMode] = useState<WeatherMode>('live')
   const [sites, setSites] = useState<Site[]>([])
   const [siteId, setSiteId] = useState('')
-  const [date, setDate] = useState(FIRST_DATE)
   const [horizon, setHorizon] = useState<24 | 48>(48)
   const [siteError, setSiteError] = useState('')
   const [error, setError] = useState('')
@@ -74,23 +58,23 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController()
     setSites([]); setSiteId(''); setSiteError('')
-    getSites(mode, controller.signal).then(loaded => {
+    getSites(controller.signal).then(loaded => {
       if (controller.signal.aborted) return
       setSites(loaded)
       if (loaded.length) setSiteId(loaded[0].turbine_id)
-      else setSiteError(mode === 'archive' ? ru.noArchiveSites : ru.noSites)
+      else setSiteError(ru.noSites)
     }).catch(err => { if (!controller.signal.aborted) setSiteError(errorMessage(err)) })
     return () => controller.abort()
-  }, [mode])
+  }, [])
 
-  async function runForecast(next: { siteId: string, date: string, horizon: 24 | 48, mode: WeatherMode }, refresh = false) {
+  async function runForecast(next: { siteId: string, horizon: 24 | 48 }, refresh = false) {
     invalidate()
     const epoch = requestEpoch.current
     const controller = new AbortController()
     forecastController.current = controller
     setLoading(true)
     setRefreshing(refresh)
-    const input: ForecastRequest = { turbine_id: next.siteId, origin: next.mode === 'live' ? new Date().toISOString() : originForDate(next.date), horizon_hours: next.horizon, mode: next.mode }
+    const input: ForecastRequest = { turbine_id: next.siteId, origin: new Date().toISOString(), horizon_hours: next.horizon, mode: 'live' }
     try {
       if (refresh) {
         await refreshWeather(next.siteId, controller.signal)
@@ -156,13 +140,12 @@ export default function App() {
   }
 
   const selectedSite = sites.find(s => s.turbine_id === siteId)
-  const origin = originForDate(date)
   const mean = result ? result.hours.reduce((sum, row) => sum + row.power_norm, 0) / result.hours.length : 0
 
   return <div className="app-shell">
     <header className="page-header">
       <div><h1>{ru.pageTitle}</h1><p>{ru.pageSubtitle}</p></div>
-      <span className="mode-badge"><i />{mode === 'live' ? ru.live : mode === 'fixture' ? ru.fixture : ru.archive}</span>
+      <span className="mode-badge"><i />{ru.live}</span>
     </header>
     <main className="workspace">
       <aside className="setup-column" aria-label={ru.selectForecast}>
@@ -172,22 +155,18 @@ export default function App() {
           <label className="field"><span>{ru.turbine}</span><select aria-label={ru.turbine} value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">{ru.chooseTurbine}</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id}</option>)}</select></label>
           {selectedSite && <div className="site-meta"><span>{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.latitude)} · {new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.longitude)}</span><small>{coordinateLabel(selectedSite.coordinate_status)}</small>{selectedSite.coordinate_source && <a href={selectedSite.coordinate_source} target="_blank" rel="noreferrer">{ru.openMap} ↗</a>}</div>}
           {siteError && <div className="error-banner" role="alert">{siteError}</div>}
-          <div className="field-grid">
-            {mode !== 'live' && <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>}
-            <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
-          </div>
-          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="live">{ru.live}</option><option value="fixture">{ru.fixture}</option></select></label>
-          <p className="origin-note">{mode === 'live' ? ru.liveTime : date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
-          <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
+          <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
+          <p className="origin-note">{ru.liveTime}</p>
+          <button className="primary-button" disabled={!siteId || loading} onClick={() => runForecast({ siteId, horizon })}>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
           {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
-        <p className="scope-note">{mode === 'live' ? ru.liveNotice : ru.notice}</p>
+        <p className="scope-note">{ru.liveNotice}</p>
       </aside>
       <div className="results-column">
         {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.emptyTitle}</h2><p>{loading ? ru.loadingHint : ru.emptyText}</p></section>}
         {result && <>
           <section className="panel result-panel">
-            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><div className="result-actions">{mode === 'live' && <button type="button" className="secondary-button" onClick={() => runForecast({ siteId, date, horizon, mode }, true)}>{ru.refreshWeather}</button>}<button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div></div>
+            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><div className="result-actions"><button type="button" className="secondary-button" onClick={() => runForecast({ siteId, horizon }, true)}>{ru.refreshWeather}</button><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div></div>
             <div className="weather-freshness" aria-label={ru.weatherRetrieved}><span><strong>{ru.weatherProvider}</strong> {weatherProviderLabel(result.weather_provenance.provider)}</span><span><strong>{ru.weatherRetrieved}</strong> {result.weather_provenance.retrieved_at ? localTime(result.weather_provenance.retrieved_at, result.timezone) : ru.weatherRetrievalUnknown}</span>{result.weather_provenance.weather_cache_hit === true && <span>{ru.cachedWeather}</span>}</div>
             <div className="metrics">
               <div><span>{ru.meanPower}</span><strong>{percent(mean)}</strong><small>{ru.normalized}</small></div>
@@ -227,7 +206,6 @@ export default function App() {
               <ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{statusLabel(step.status)}</span><strong>{stepLabel(step.step)}</strong><small>{traceDetail(step.step, step.detail)}</small></li>)}</ol>
             </details>
           </section>
-          {mode !== 'live' && <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>{ru.advance} →</button>}
         </>}
       </div>
     </main>
