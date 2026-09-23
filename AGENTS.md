@@ -52,8 +52,10 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.
 
-Weather/coordinates remain synthetic fixtures in the current app. They must be
-labeled. OpenAI is a real adapter; missing keys/failure must be labeled fallback.
+Weather remains synthetic and must be labeled. Coordinates for T1/T2 were supplied
+and mapped by the user through Google Maps; retain `coordinate_status=user_provided`
+and the source links (see CONTRACTS.md). OpenAI is a real adapter; missing
+keys/failure must be labeled fallback.
 Do not claim full organizer compliance until archive weather and replay work.
 
 ## Ownership and how to make changes

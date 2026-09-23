@@ -46,7 +46,7 @@ def test_ui_forecast_update_and_stale_results(ui):
 
 def test_marker_identity_and_background_click(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "fixture")
-    event = {"last_object_clicked": {"lat": 0, "lng": 0.03}}
+    event = {"last_object_clicked": {"lat": 43.643198, "lng": 78.538828}}
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: event)
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
     assert not app.exception
@@ -63,8 +63,10 @@ def test_archive_mode_does_not_display_fixture_forecast(monkeypatch):
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: {"last_object_clicked": None})
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
     assert not app.exception
+    app.selectbox(key="selected_site").select("T1").run()
+    app.button(key="predict").click().run()
     assert "result" not in app.session_state
-    assert any("Archive mode is unavailable" in item.value for item in app.info)
+    assert any("WEATHER_UNAVAILABLE" in item.value for item in app.error)
 
 
 def test_summary_stub_keeps_real_forecast(ui, monkeypatch):
