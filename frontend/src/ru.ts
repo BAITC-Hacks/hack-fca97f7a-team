@@ -75,7 +75,7 @@ const fields: Record<string, string> = {
   coordinate_status: 'Статус координат',
   assumed_available_by: 'Предполагаемая доступность', availability_verified: 'Доступность подтверждена',
   run_policy: 'Правило выбора выпуска', documentation_url: 'Документация поставщика',
-  forecast_date: 'Первый день прогноза',
+  forecast_date: 'Первый день прогноза', object_count: 'Число исходных объектов', provider_documentation: 'Документация источника',
   grid_resolution: 'Разрешение погодной сетки', grid_resolution_degrees: 'Разрешение сетки, градусы',
   source_step_hours: 'Исходный шаг прогноза, часы', publication_evidence: 'Подтверждение публикации',
   weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
@@ -93,6 +93,7 @@ export const stepLabel = (step: string) => ({
 export const provenanceLabel = (value: string) => ({
   linear: 'Линейная интерполяция', linear_3h_to_hourly: 'Линейная интерполяция с 3-часового на почасовой шаг',
   s3_last_modified: 'Время публикации копии в публичном архиве',
+  operational_object_last_modified: 'Время публикации операционного объекта архива',
   provider_documented: 'Архив · доступность по допущению',
   provider_documented_conservative_24h: 'Документация поставщика; запас 24 часа',
   previous_day_00z_for_18z_origin: 'Выпуск 00:00 UTC предыдущего дня для расчёта в 18:00 UTC',
