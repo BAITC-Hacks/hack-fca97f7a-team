@@ -236,7 +236,7 @@ LLM prose must not overwrite predictions, uncertainty, or provenance.
 
 ```python
 summarize_forecast(result, backend="template") -> dict
-answer_question(result, question, backend="llm") -> dict
+answer_question(result, question, backend="llm", *, history=None, selection=None) -> dict
 ```
 
 FastAPI supplies a server-stored successful result, never client-authored power
@@ -365,3 +365,29 @@ It does not auto-call explanation on restore. Missing/expired IDs return404 and
 are cleared; explicit refresh regenerates real weather and prediction.
 
 Model registries now write paths relative to latest.json (T1/hash). The loader retains legacy absolute/repository-relative compatibility and requires the resolved turbine directory. scripts/package_replay.py verifies and exports a portable February bundle without secrets or training CSVs.
+
+## Conversation tools and context
+
+`POST /api/forecasts/{id}/questions` additionally accepts optional
+`conversation_id` (32 lowercase hex characters). Omit it to start a new dialogue.
+The response returns that ID, optional `selection={start,end}` (UTC half-open)
+and `tool_results` with computed data and optional tables, plus `notes`.
+History and selection live on the server: 128 conversations, ten messages each.
+An ID cannot be reused for another forecast. Expired/mismatched IDs return
+404/CONVERSATION_NOT_FOUND; concurrent questions return409/CONVERSATION_BUSY.
+React clears an expired dialogue ID and offers a retry, and resets conversation
+on forecast changes. Reload restores the forecast, not a historical dialogue.
+
+`backend/services/forecast_tools.py` supplies best/worst hours, continuous windows,
+period weather, average power, adjacent-period comparisons and power changes.
+These are pure Python calculations over the stored forecast. OpenAI can call
+at most four tools across three responses; local fallback supports common Russian
+questions. Numerical claims are screened against returned facts (including
+rounding and normalized-power percentages); this is not a proof of semantic
+correctness of arbitrary prose. Unsupported MW/MWh cannot be inferred.
+No LLM output changes the numeric forecast. Notes and safe Markdown are rendered
+separately; tables come from server calculations. Model context is an allowlisted
+projection of metadata and contains no raw training CSV or keys.
+
+Live timing remains main's contract: server origin is the current UTC hour,
+first target is the next full hour. The PR's double hour increment was removed.

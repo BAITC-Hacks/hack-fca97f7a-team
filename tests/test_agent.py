@@ -114,3 +114,20 @@ def test_documented_weather_requires_explicit_internal_opt_in():
     bundle['manifest']['assumed_available_by'] = '2026-02-01T00:00:00Z'
     with pytest.raises(ForecastError):
         agent._validated_weather(bundle, req, load_sites()[0], allow_documented_archive=True)
+
+
+def test_explanation_context_uses_model_metadata_without_training_files(predictions):
+    def documented_model(site):
+        fitted = model_loader(site)
+        fitted.metadata.update(training_rows=321, training_source="supplied turbine measurements",
+                               feature_names=["wind_speed_ms", "temperature_c"],
+                               feature_units={"wind_speed_ms": "m/s", "temperature_c": "°C"},
+                               source_csv="/private/training.csv", secret="not for explanations")
+        return fitted
+    result = agent.run_forecast(request(), model_loader=documented_model)
+    context = result["model_context"]
+    assert context["training_rows"] == 321
+    assert context["feature_names"] == ["wind_speed_ms", "temperature_c"]
+    assert context["train_origin"] == FIRST_ORIGIN
+    assert "source_csv" not in context and "secret" not in context
+    assert any("не доказывает" in limitation for limitation in context["limitations"])

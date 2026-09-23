@@ -194,6 +194,8 @@ def _render_result(result: dict, summary: dict) -> None:
 
     st.markdown("**Computed analysis**")
     st.write(summary["text"])
+    for note in summary.get("notes", []):
+        st.caption(note)
     if summary.get("warning"):
         st.info(summary["warning"])
     st.caption(f"Summary backend: {summary['backend']} · forecast {summary['forecast_fingerprint']}")

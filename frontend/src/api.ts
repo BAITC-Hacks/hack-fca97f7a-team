@@ -1,4 +1,4 @@
-import type { ApiError, Explanation, ForecastRequest, ForecastResult, Site } from './types'
+import type { ApiError, Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site } from './types'
 import { apiErrors, ru } from './ru'
 
 export class ApiFailure extends Error {
@@ -56,8 +56,8 @@ export function explainForecast(id: string, signal?: AbortSignal): Promise<Expla
   return request<Explanation>(`/forecasts/${encodeURIComponent(id)}/explanation`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ backend: 'llm' }), signal })
 }
 
-export function askQuestion(id: string, question: string, signal?: AbortSignal): Promise<Explanation> {
-  return request<Explanation>(`/forecasts/${encodeURIComponent(id)}/questions`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ question, backend: 'llm' }), signal })
+export function askQuestion(id: string, question: string, conversationId?: string, signal?: AbortSignal): Promise<QuestionAnswer> {
+  return request<QuestionAnswer>(`/forecasts/${encodeURIComponent(id)}/questions`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ question, backend: 'llm', ...(conversationId ? { conversation_id: conversationId } : {}) }), signal })
 }
 
 export function downloadUrl(id: string, kind: 'forecast' | 'model-input'): string {

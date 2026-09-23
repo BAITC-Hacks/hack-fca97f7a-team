@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiFailure, askQuestion, createForecast, downloadCsv, explainForecast, getForecast, getSites, refreshWeather } from './api'
-import type { Explanation, ForecastRequest, ForecastResult, Site } from './types'
+import type { Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site } from './types'
 import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail, weatherProviderLabel } from './ru'
 import PowerChart from './PowerChart'
 import SiteMap from './SiteMap'
+import AssistantText from './AssistantText'
 import { saveBlob } from './chartExport'
 
 function errorMessage(error: unknown): string {
+  if (error instanceof TypeError) return 'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.'
   if (error instanceof Error) return error.message
   return ru.requestFailed
 }
@@ -40,6 +42,17 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
   </section>
 }
 
+function AnswerContent({ answer }: { answer: QuestionAnswer }) {
+  return <AssistantText answer={answer}>
+    {answer.selection && <p className="answer-selection"><strong>{ru.selectedPeriod}</strong> {localTime(answer.selection.start, 'Asia/Almaty')} — {localTime(answer.selection.end, 'Asia/Almaty')}</p>}
+    {answer.tool_results?.filter(result => result.table && result.table.columns.length > 0).map((result, index) => <div className="table-scroll chat-table" key={`${result.tool}-${index}`}>
+      <table><caption>{ru.calculationTable}</caption><thead><tr>{result.table!.columns.map((column, i) => <th scope="col" key={i}>{column}</th>)}</tr></thead>
+        <tbody>{result.table!.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody>
+      </table>
+    </div>)}
+  </AssistantText>
+}
+
 export default function App() {
   const [sites, setSites] = useState<Site[]>([])
   const [siteId, setSiteId] = useState('')
@@ -56,7 +69,7 @@ export default function App() {
   const [restoring, setRestoring] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [question, setQuestion] = useState('')
-  const [conversation, setConversation] = useState<{ question: string, answer: Explanation }[]>([])
+  const [conversation, setConversation] = useState<{ question: string, answer: QuestionAnswer }[]>([])
   const [pendingQuestion, setPendingQuestion] = useState('')
   const [questionError, setQuestionError] = useState('')
   const [downloadError, setDownloadError] = useState('')
@@ -64,12 +77,16 @@ export default function App() {
   const requestEpoch = useRef(0)
   const forecastController = useRef<AbortController | null>(null)
   const answerController = useRef<AbortController | null>(null)
+  const conversationId = useRef<string | null>(null)
+  const askingNow = useRef(false)
   const lastSuccess = useRef<ForecastResult | null>(null)
 
   function invalidate() {
     requestEpoch.current += 1
     forecastController.current?.abort()
     answerController.current?.abort()
+    conversationId.current = null
+    askingNow.current = false
     setResult(null); setPrevious(null); setExplanation(null); setConversation([]); setQuestion(''); setPendingQuestion('')
     setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setRestoring(false); setRefreshing(false); setAsking(false); setExplanationPending(false); setRestored(false)
   }
@@ -151,31 +168,40 @@ export default function App() {
       setLoading(false)
       await loadExplanation(forecast, controller, epoch)
     } catch (err) {
-      if (epoch === requestEpoch.current && !controller.signal.aborted) { setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
+      if (epoch === requestEpoch.current && !controller.signal.aborted) { lastSuccess.current = null; setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
     }
   }
 
   async function submitQuestion(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!result || !question.trim()) return
-    answerController.current?.abort()
+    if (!result || !question.trim() || askingNow.current) return
+    askingNow.current = true
     const controller = new AbortController()
     answerController.current = controller
     const epoch = requestEpoch.current
     const submitted = question.trim()
     setPendingQuestion(submitted); setQuestion(''); setQuestionError(''); setAsking(true)
     try {
-      const response = await askQuestion(result.forecast_id, submitted, controller.signal)
+      const response = await askQuestion(result.forecast_id, submitted, conversationId.current ?? undefined, controller.signal)
       if (epoch === requestEpoch.current && !controller.signal.aborted) {
         if (response.forecast_fingerprint !== result.fingerprint) throw new Error(ru.staleAnswer)
+        if (!response.conversation_id || (conversationId.current && response.conversation_id !== conversationId.current)) throw new Error(ru.invalidServerResponse)
+        conversationId.current = response.conversation_id
         setConversation(current => [...current, { question: submitted, answer: response }])
         setPendingQuestion('')
       }
     } catch (err) {
       if (epoch === requestEpoch.current && !controller.signal.aborted) {
-        setQuestionError(errorMessage(err)); setPendingQuestion(''); setQuestion(submitted)
+        if (err instanceof ApiFailure && err.code === 'CONVERSATION_NOT_FOUND') {
+          conversationId.current = null
+          setConversation([])
+          setQuestionError(ru.newConversation)
+        } else setQuestionError(errorMessage(err))
+        setPendingQuestion(''); setQuestion(submitted)
       }
-    } finally { if (epoch === requestEpoch.current && !controller.signal.aborted) setAsking(false) }
+    } finally {
+      if (epoch === requestEpoch.current && !controller.signal.aborted) { askingNow.current = false; setAsking(false) }
+    }
   }
 
   async function saveCsv(kind: 'forecast' | 'model-input') {
@@ -235,11 +261,11 @@ export default function App() {
             <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
               <div className="chat-message assistant-message">
                 <span className="message-author">{ru.analysisAuthor}</span>
-                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationPending ? <p className="muted loading-status" role="status">{ru.explanationLoading}</p> : restored ? <><p className="muted">{ru.savedExplanationHint}</p><button type="button" className="secondary-button" onClick={() => { if (!result) return; const controller = new AbortController(); forecastController.current = controller; void loadExplanation(result, controller, requestEpoch.current) }}>{ru.loadExplanation}</button>{explanationError && <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
+                {explanation ? <><AssistantText answer={explanation} />{explanation.model && <div className="explanation-meta">{explanation.model}</div>}</> : explanationPending ? <p className="muted loading-status" role="status">{ru.explanationLoading}</p> : restored ? <><p className="muted">{ru.savedExplanationHint}</p><button type="button" className="secondary-button" onClick={() => { const controller = new AbortController(); forecastController.current = controller; void loadExplanation(result, controller, requestEpoch.current) }}>{ru.loadExplanation}</button>{explanationError && <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
               </div>
               {conversation.map((exchange, index) => <div className="chat-exchange" key={index}>
                 <div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{exchange.question}</p></div>
-                <div className="chat-message assistant-message"><span className="message-author">{exchange.answer.backend === 'llm' ? ru.aiExplanation : ru.computed}</span><p>{exchange.answer.text}</p>{exchange.answer.warning && <p className="message-warning">{exchange.answer.warning}</p>}</div>
+                <div className="chat-message assistant-message"><span className="message-author">{ru.analysisAuthor}</span><AnswerContent answer={exchange.answer} /></div>
               </div>)}
               {pendingQuestion && <><div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{pendingQuestion}</p></div><p className="muted loading-status" role="status">{ru.asking}</p></>}
             </div>
@@ -256,7 +282,7 @@ export default function App() {
             <details><summary>{ru.technicalDetails}</summary>
               <div className="model-input"><div><h3>{ru.modelInput}</h3><button type="button" className="secondary-button" onClick={() => saveCsv('model-input')}>{ru.downloadInput}</button></div><p>{result.model_input.row_count} {ru.rows} · {result.model_input.schema_version}</p><code>{result.model_input.columns.join(', ')}</code></div>
               {result.analysis.warnings.length > 0 && <ul className="analysis-warnings">{result.analysis.warnings.map(warning => <li key={warning}>{warningLabel(warning)}</li>)}</ul>}
-              <div className="provenance"><div><strong>{ru.trainingCutoff}</strong><span>{localTime(result.train_last_interval_start, result.timezone)}</span></div><div><strong>{ru.cached}</strong><span>{result.cache_hit ? ru.yes : ru.no}</span></div>{Object.entries(result.weather_provenance).filter(([key]) => ['weather_model', 'wind_height_m', 'temperature_height_m', 'coordinate_status', 'wind_height_status'].includes(key)).map(([key, value]) => <div key={key}><strong>{fieldLabel(key)}</strong><span>{provenanceValue(key, String(value), result.timezone)}</span></div>)}</div>
+              <div className="provenance"><div><strong>{ru.weatherRun}</strong><span>{result.run_id}</span></div><div><strong>{ru.model}</strong><span>{result.model_id}</span></div>{result.model_provenance && <><div><strong>{ru.modelProfile}</strong><span>{result.model_provenance.profile === 'open_meteo_ecmwf_ifs_10m' ? ru.profileEcmwf : ru.profileMeasured}</span></div><div><strong>{ru.trainingWeather}</strong><span>{result.model_provenance.training_weather_kind === 'retrospective_stitched_forecast' ? ru.retrospectiveTrainingWeather : ru.notSpecified}</span></div><div><strong>{ru.forecastAccuracy}</strong><span>{result.model_provenance.forecast_accuracy_verified ? ru.yes : ru.notVerified}</span></div></>}<div><strong>{ru.trainingCutoff}</strong><span>{localTime(result.train_last_interval_start, result.timezone)}</span></div><div><strong>{ru.cached}</strong><span>{result.cache_hit ? ru.yes : ru.no}</span></div>{Object.entries(result.weather_provenance).map(([key, value]) => <div key={key}><strong>{fieldLabel(key)}</strong><span>{provenanceValue(key, value === null || value === undefined ? ru.notSpecified : String(value), result.timezone)}</span></div>)}</div>
               <ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{statusLabel(step.status)}</span><strong>{stepLabel(step.step)}</strong><small>{traceDetail(step.step, step.detail)}</small></li>)}</ol>
             </details>
           </section>
