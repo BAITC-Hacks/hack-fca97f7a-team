@@ -1,3 +1,8 @@
+> Current scope: the user removed historical archive/replay from the demo requirements.
+> The UI offers live weather and explicit synthetic fixtures only. Existing archive
+> utilities are optional internal tooling, not a demo dependency or delivery blocker.
+> Historical references below do not expand the current scope.
+
 # Hackathon Plan
 
 ## 1. Problem

@@ -176,7 +176,7 @@ export default function App() {
             {mode !== 'live' && <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>}
             <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
           </div>
-          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="live">{ru.live}</option><option value="fixture">{ru.fixture}</option><option value="archive">{ru.archive}</option></select></label>
+          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="live">{ru.live}</option><option value="fixture">{ru.fixture}</option></select></label>
           <p className="origin-note">{mode === 'live' ? ru.liveTime : date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
           <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? (refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
           {error && <div className="error-banner" role="alert">{error}</div>}
