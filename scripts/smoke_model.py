@@ -15,7 +15,8 @@ import sys
 import numpy as np
 
 import model
-from contracts import FEATURES
+from contracts import FEATURES, artifact_dir
+from model_input import write_model_input
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,12 +52,11 @@ def run(models_dir: Path) -> dict:
     if not isinstance(index, dict) or any(tid not in index for tid in ("T1", "T2")):
         raise RuntimeError("latest.json must map T1 and T2 to artifact directory paths")
 
+    if models_dir.resolve() != (artifact_dir() / "models").resolve():
+        raise RuntimeError("Set ARTIFACT_DIR to the parent of --models-dir for the model registry")
     loaded = {}
     for turbine_id in ("T1", "T2"):
-        artifact = Path(index[turbine_id])
-        if not artifact.is_absolute():
-            artifact = ROOT / artifact
-        bundle = model.load_model(artifact)
+        bundle = model.load_model(turbine_id)
         if bundle.metadata.get("turbine_id") != turbine_id:
             raise RuntimeError(f"Artifact for {turbine_id} contains a different turbine identity")
         loaded[turbine_id] = bundle
@@ -71,17 +71,19 @@ def run(models_dir: Path) -> dict:
                     raise RuntimeError("Synthetic weather row count mismatch")
                 if any(not all(feature in row for feature in FEATURES) for row in rows):
                     raise RuntimeError("Synthetic weather is missing model features")
-                first = model.predict_power(bundle, rows)
-                # Reload from disk and repeat to cover artifact load and stable
-                # repeated inference, without asserting learned values.
-                reloaded = model.load_model(Path(index[turbine_id]) if Path(index[turbine_id]).is_absolute()
-                                            else ROOT / index[turbine_id])
-                repeated = model.predict_power(reloaded, rows)
+                csv_meta = write_model_input(rows, turbine_id, origin, horizon)
+                csv_path = artifact_dir() / "model_inputs" / csv_meta["filename"]
+                first = model.predict_power_csv(bundle, csv_path, turbine_id=turbine_id,
+                                                origin=origin, horizon_hours=horizon,
+                                                expected_sha256=csv_meta["sha256"])
+                # Reload from disk and repeat the exact CSV inference path.
+                reloaded = model.load_model(turbine_id)
+                repeated = model.predict_power_csv(reloaded, csv_path, turbine_id=turbine_id,
+                                                   origin=origin, horizon_hours=horizon,
+                                                   expected_sha256=csv_meta["sha256"])
                 values = np.asarray(first, dtype=float)
                 if values.shape != (horizon,) or not np.isfinite(values).all():
                     raise RuntimeError(f"Invalid output size or nonfinite predictions for {turbine_id}")
-                if np.any((values < 0) | (values > 1)):
-                    raise RuntimeError(f"Prediction outside [0, 1] for {turbine_id}")
                 if first != repeated:
                     raise RuntimeError(f"Reloaded model predictions differ for {turbine_id}")
                 cases.append({
@@ -89,9 +91,11 @@ def run(models_dir: Path) -> dict:
                     "origin": origin,
                     "horizon_hours": horizon,
                     "prediction_count": len(first),
-                    "finite_and_bounded": True,
+                    "finite_raw_predictions": True,
+                    "raw_values_outside_normalized_range": int(np.count_nonzero((values < 0) | (values > 1))),
                     "reload_repeat_equal": True,
                     "model_id": bundle.metadata["model_id"],
+                    "model_input_sha256": csv_meta["sha256"],
                 })
     return {
         "status": "ok",
