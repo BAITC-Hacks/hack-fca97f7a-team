@@ -27,6 +27,7 @@ Backend: `backend/api.py`; frontend transport: `frontend/src/api.ts`; TypeScript
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
 | `GET /api/sites?mode=live` | mode: live (UI); fixture/archive (internal) | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
+| `GET /api/forecasts/{id}` | stored forecast ID | checked stored result; no weather/model/LLM calls |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
 | `POST /api/forecasts/{id}/explanation` | `{"backend":"llm"}` (or template) | explanation below |
@@ -334,3 +335,21 @@ digest. Downloads/explanations restore after memory eviction or restart, subject
 to disk retention. Inputs remain server-owned; corrupt JSON, wrong identity,
 invalid coverage or checksum mismatches are rejected. Legacy baseline fields
 are stripped before response/explanation. No database or distributed workers.
+
+## Conditional February replay (internal CLI only)
+
+`backend/adapters/replay_weather.py` stores individual dated ECMWF IFS responses.
+The CLI explicitly opts in using `--weather-source provider-documented`; HTTP
+archive and default replay retain the strict verified gate. This path returns
+`provenance_status=provider_documented`, `available_at=null`,
+`availability_verified=false`, `assumed_available_by=run+24h` (an assumption).
+The selected run is previous-day 00 UTC for origin 18 UTC, age42h. Agent accepts
+this only with `allow_documented_archive=True`, preserving the caveat in output.
+No publication time or external attestation is manufactured. See docs/february-replay.md.
+
+React retains only the last live forecast ID in localStorage. On reload it uses
+GET to reopen checked server data and labels it saved, with original retrieval time.
+It does not auto-call explanation on restore. Missing/expired IDs return404 and
+are cleared; explicit refresh regenerates real weather and prediction.
+
+Model registries now write paths relative to latest.json (T1/hash). The loader retains legacy absolute/repository-relative compatibility and requires the resolved turbine directory. scripts/package_replay.py verifies and exports a portable February bundle without secrets or training CSVs.

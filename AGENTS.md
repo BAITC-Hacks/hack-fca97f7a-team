@@ -1,7 +1,8 @@
-> Current scope: the user removed historical archive/replay from the demo requirements.
-> The UI offers live weather only. Synthetic fixtures are internal test inputs. Existing archive
-> utilities are optional internal tooling, not a demo dependency or delivery blocker.
-> Historical references below do not expand the current scope.
+> Current scope: finish missing jury requirements while keeping the UI live-only.
+> February CLI may explicitly use provider-documented Single Runs with inferred
+> availability, clearly labelled and never promoted to verified as-issued evidence.
+> Keep the default strict archive gate; internal conditional replay requires an
+> explicit opt-in and available_at=null. See docs/february-replay.md.
 
 # Working agreement
 
@@ -52,7 +53,9 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
   UTC-aware and hourly; never use today's date implicitly for historical replay.
 - Weather initialization ≤ availability ≤ origin; verify every forecast hour,
   turbine identity and finite units before inference or cache reuse.
-- Archive mode requires verified as-issued forecasts. Never replace them silently
+- Default archive mode requires verified as-issued forecasts. The explicit internal
+  provider-documented replay uses a separate conditional provenance status and never
+  claims verified publication times. Never replace forecasts silently
   with fixtures, reanalysis, actual weather or retrospectively generated hindcasts.
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.

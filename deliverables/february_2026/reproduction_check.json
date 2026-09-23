@@ -1,0 +1,15 @@
+{
+  "tests_passed": 165,
+  "paid_llm_calls": 0,
+  "replay_network_calls": 0,
+  "files": {
+    "documented_forecast.csv": {
+      "sha256": "16c0bb5a74e412308e2a5af4ddfbf3fd30695a7568f657b741932cbd84702cd8",
+      "byte_identical_after_relocation": true
+    },
+    "documented_daily_forecast.csv": {
+      "sha256": "f1925ff1792ca52666c319a6c1ed9d0e8a6cec3c184397524818bde0b39c4dc4",
+      "byte_identical_after_relocation": true
+    }
+  }
+}
