@@ -1,4 +1,4 @@
-"""Registered demo sites and explicitly synthetic, dated weather runs."""
+"""User-supplied turbine locations and explicitly synthetic, dated weather runs."""
 from __future__ import annotations
 
 import json
@@ -7,18 +7,18 @@ from pathlib import Path
 from contracts import ForecastError, fixture_dir
 
 SITES = (
-    {"turbine_id": "T1", "latitude": 0.0, "longitude": 0.0,
-     "timezone": "Asia/Almaty", "coordinate_status": "fixture"},
-    {"turbine_id": "T2", "latitude": 0.0, "longitude": 0.03,
-     "timezone": "Asia/Almaty", "coordinate_status": "fixture"},
+    {"turbine_id": "T1", "latitude": 43.645150, "longitude": 78.535604,
+     "timezone": "Asia/Almaty", "coordinate_status": "user_provided",
+     "coordinate_source": "https://maps.app.goo.gl/iN6svMt69D5qRpFU9"},
+    {"turbine_id": "T2", "latitude": 43.643198, "longitude": 78.538828,
+     "timezone": "Asia/Almaty", "coordinate_status": "user_provided",
+     "coordinate_source": "https://maps.app.goo.gl/8UQMwsYavY6nLvFY8"},
 )
 
 
 def load_sites(mode: str = "fixture") -> list[dict]:
     if mode not in ("fixture", "archive"):
         raise ForecastError("INVALID_INPUT", "Mode must be fixture or archive.")
-    if mode == "archive":
-        return []  # Authoritative coordinates have not been verified.
     return [dict(site) for site in SITES]
 
 

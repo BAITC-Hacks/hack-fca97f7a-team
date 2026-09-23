@@ -15,7 +15,7 @@ import pandas as pd
 
 from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS
 from data import ingest_all
-from model import _PARAMETERS as MODEL_PARAMETERS, predict_power, train_model
+from model import _PARAMETERS as MODEL_PARAMETERS, _raw_predictions, train_model
 
 
 PERIODS = {
@@ -57,7 +57,7 @@ def evaluate_window(
     origin: pd.Timestamp,
     horizon: int,
     *,
-    predictor=predict_power,
+    predictor=_raw_predictions,
 ) -> tuple[list[dict], int, int]:
     """Score available target hours and count missing complete-hour truth."""
     baseline, baseline_at = latest_completed_power(site_history, origin)

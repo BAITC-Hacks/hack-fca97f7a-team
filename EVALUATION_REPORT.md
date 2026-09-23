@@ -12,7 +12,8 @@ The measured-weather diagnostic favors retaining this HGB recipe over a simple
 persistence baseline for the current demo. **It does not establish 24/48-hour
 forecast accuracy:** each predicted target hour uses wind and temperature
 measured during that same future hour. A real forecast will use weather issued
-at or before its origin, with different measurement height and error. Verified
+at or before its origin, with potentially different wind-height representation
+and forecast error; the provider wind height is unconfirmed. Verified
 as-issued archived weather and February power truth are unavailable.
 
 ## Protocol

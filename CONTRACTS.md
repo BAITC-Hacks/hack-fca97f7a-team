@@ -25,7 +25,7 @@ Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
-| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status}]}` |
+| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
@@ -89,8 +89,16 @@ interpolation policy. `initialized_at <= available_at <= origin` is mandatory.
 Archive mode requires verified provenance. The current adapter has two synthetic
 runs per turbine and returns a clear unavailable error for real archive mode.
 
-To replace fixtures: implement archive retrieval behind this function, provide
-verified real sites via `load_sites`, and keep the bundle shape. Test malformed
+Site coordinates were supplied and mapped by the user: T1 is
+`43.645150, 78.535604` ([source](https://maps.app.goo.gl/iN6svMt69D5qRpFU9));
+T2 is `43.643198, 78.538828` ([source](https://maps.app.goo.gl/8UQMwsYavY6nLvFY8)).
+`coordinate_status=user_provided` describes this source; `coordinate_source` is
+the original Maps URL. Sites are available in both modes, while archive weather
+remains unavailable. The fixture weather is still synthetic. Coordinates are
+included in the existing forecast cache identity through the site metadata.
+
+To replace fixtures: implement archive retrieval behind this function using the
+registered user-provided sites, and keep the bundle shape. Test malformed
 values, missing hours, wrong turbine and future publication times. Do not substitute
 actual historical weather for as-issued forecasts.
 
@@ -194,3 +202,14 @@ Tests never use paid APIs: the suite clears the key and mocks SDK responses.
 `tests/test_api.py` verifies transport/download/stored-result boundaries;
 `tests/test_explanation.py` verifies grounded payloads, cache and failures.
 Commit compatible increments and coordinate shared schema changes across A/B/C.
+
+## Versioned model artifacts
+
+`load_model(turbine_id)` remains the orchestration boundary. Training writes
+`artifacts/models/<turbine>/<model-hash>/model.pkl` and `metadata.json`, then
+updates `latest.json`. Loading verifies estimator identity, checksum, feature
+units/order and Python/scikit-learn compatibility. Trusted legacy per-turbine
+pickle files remain readable only when no new registry exists; retraining migrates.
+Metadata retains `train_origin` and `features` alongside `train_cutoff` and
+`feature_names`. `predict_power_csv` returns raw finite predictions so the agent
+retains ownership of clipping/counts. The independent diagnostic helper may clip.

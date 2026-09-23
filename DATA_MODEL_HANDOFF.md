@@ -56,8 +56,10 @@ The canonical inference CSV is version `weather-features-v1` with columns
 `turbine_id,valid_at,wind_speed_ms,temperature_c`. `model_input.py` writes the
 content-addressed CSV and `model.predict_power_csv` reads and validates the exact
 bytes before inference. The model expects `[wind_speed_ms, temperature_c]` in that
-order. No target column enters the CSV. `weather.py` currently serves explicitly
-synthetic fixtures and fictional coordinates `(0,0)` and `(0,0.03)`; it does not
+order. `weather.py` registers the user-provided T1/T2 coordinates
+`43.645150, 78.535604` and `43.643198, 78.538828` with their Google Maps
+source links, as specified in [CONTRACTS.md](CONTRACTS.md). No target column
+enters the CSV. Weather remains explicitly synthetic; the adapter does not
 declare wind height, a real provider, or as-issued availability. In particular,
 there is **no justified wind-height conversion** at this stage. A future provider
 must document its target height, interpolation and available-at evidence before
@@ -101,9 +103,10 @@ Generated canonical history/audits live in ignored `data/canonical/`; fitted
 models, model-input CSVs and evaluation outputs live in ignored `artifacts/`.
 The chronological measured-weather scores and example plots are described in
 [EVALUATION_REPORT.md](EVALUATION_REPORT.md). Stream A must verify
-site coordinates, wind variable height and actual as-issued weather availability
+wind variable height and actual as-issued weather availability for the supplied
+coordinates
 before implementing an archive adapter. Stream B should keep the frozen cutoff
 and measured-weather baseline, then add full February replay
 only after verified archives arrive. Stream C should retain Russian labels for
-fixture weather, fictional coordinates, normalized power and explanation backend.
+fixture weather, user-provided coordinates, normalized power and explanation backend.
 The fixture demo works locally but does not satisfy full organizer replay scope.

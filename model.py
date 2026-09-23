@@ -184,8 +184,8 @@ def predict_with_diagnostics(model: ModelBundle, weather_rows: list[dict]) -> tu
 
 
 def predict_power(model: ModelBundle, weather_rows: list[dict]) -> list[float]:
-    """Return finite raw predictions; the agent owns clipping and its audit."""
-    return _raw_predictions(model, weather_rows).tolist()
+    """Return bounded values for local diagnostics outside orchestration."""
+    return predict_with_diagnostics(model, weather_rows)[0]
 
 
 def predict_power_csv(model: ModelBundle, csv_path: Path, *, turbine_id: str, origin: str,
@@ -196,7 +196,7 @@ def predict_power_csv(model: ModelBundle, csv_path: Path, *, turbine_id: str, or
         raise ForecastError("MODEL_UNAVAILABLE", "Турбина во входном CSV не совпадает с моделью.")
     rows = read_model_input(csv_path, turbine_id=turbine_id, origin=origin,
                             horizon_hours=horizon_hours, expected_sha256=expected_sha256)
-    return predict_power(model, rows)
+    return _raw_predictions(model, rows).tolist()
 
 
 def save_model(bundle: ModelBundle, output_root: str | Path | None = None) -> Path:
@@ -273,12 +273,16 @@ def _load_versioned(path: Path) -> ModelBundle:
         metadata["params"] = _PARAMETERS.copy()
         metadata["sklearn_version"] = sklearn.__version__
         return ModelBundle(estimator, metadata)
-    except (OSError, ValueError, TypeError, KeyError, pickle.UnpicklingError, AttributeError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, pickle.UnpicklingError,
+            EOFError, AttributeError, ImportError) as exc:
         raise ForecastError("MODEL_UNAVAILABLE", "Артефакт модели отсутствует или повреждён.") from exc
 
 
-def load_model(turbine_id: str) -> ModelBundle:
+def load_model(turbine_id: str | Path) -> ModelBundle:
     """Resolve the selected turbine's versioned artifact without retraining."""
+    if isinstance(turbine_id, Path) or (isinstance(turbine_id, str) and turbine_id not in SITE_IDS
+                                           and ("/" in turbine_id or "\\" in turbine_id)):
+        return _load_versioned(Path(turbine_id))
     if turbine_id not in SITE_IDS:
         raise ForecastError("INVALID_INPUT", "Неизвестная модель турбины.")
     models_root = artifact_dir() / "models"
@@ -311,5 +315,6 @@ def load_model(turbine_id: str) -> ModelBundle:
         fitted.metadata["feature_names"] = list(FEATURES)
         fitted.metadata["train_cutoff"] = fitted.metadata["train_origin"]
         return fitted
-    except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError, AttributeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError,
+            EOFError, AttributeError, ImportError) as exc:
         raise ForecastError("MODEL_UNAVAILABLE", "Модель недоступна. Выполните python -m scripts.train --mode fixture.") from exc

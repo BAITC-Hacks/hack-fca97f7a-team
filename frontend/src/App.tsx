@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet'
-import { askQuestion, createForecast, downloadUrl, explainForecast, getSites } from './api'
-import type { Explanation, ForecastHour, ForecastRequest, ForecastResult, Site, WeatherMode } from './types'
+import { askQuestion, createForecast, downloadCsv, explainForecast, getSites } from './api'
+import type { Explanation, ForecastRequest, ForecastResult, Site, WeatherMode } from './types'
+import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail } from './ru'
+import PowerChart from './PowerChart'
+import SiteMap from './SiteMap'
+import { saveBlob } from './chartExport'
 
 const FIRST_DATE = '2026-01-31'
 const LOCAL_ZONE = 'Asia/Almaty'
@@ -17,44 +20,9 @@ function nextDate(date: string): string {
   return day.toISOString().slice(0, 10)
 }
 
-function localTime(stamp: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: LOCAL_ZONE, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stamp))
-}
-
-function pct(value: number): string { return `${(value * 100).toFixed(1)}%` }
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
-  return 'The request did not complete.'
-}
-
-function PowerChart({ hours }: { hours: ForecastHour[] }) {
-  const width = 940, height = 265, left = 42, right = 12, top = 12, bottom = 31
-  const x = (i: number) => left + i * (width - left - right) / Math.max(1, hours.length - 1)
-  const y = (v: number) => top + (1 - v) * (height - top - bottom)
-  const line = (key: 'power_norm' | 'baseline_norm') => hours.map((h, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(h[key]).toFixed(1)}`).join(' ')
-  return <div className="chart-wrap" role="img" aria-label="Hourly normalized power forecast and persistence baseline">
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      {[0, .25, .5, .75, 1].map(v => <g key={v}><line className="grid-line" x1={left} x2={width - right} y1={y(v)} y2={y(v)} /><text className="axis-label" x={left - 9} y={y(v) + 4} textAnchor="end">{Math.round(v * 100)}</text></g>)}
-      <path className="baseline-line" d={line('baseline_norm')} />
-      <path className="power-line" d={line('power_norm')} />
-      {[0, Math.floor((hours.length - 1) / 2), hours.length - 1].map(i => <text key={i} className="axis-label" x={x(i)} y={height - 5} textAnchor={i === 0 ? 'start' : i === hours.length - 1 ? 'end' : 'middle'}>{localTime(hours[i].valid_at)}</text>)}
-    </svg>
-  </div>
-}
-
-function SiteMap({ sites, selected, onSelect }: { sites: Site[], selected: string, onSelect: (id: string) => void }) {
-  const center: [number, number] = sites.length ? [sites.reduce((sum, s) => sum + s.latitude, 0) / sites.length, sites.reduce((sum, s) => sum + s.longitude, 0) / sites.length] : [0, 0]
-  return <div className="map-frame">
-    <MapContainer center={center} zoom={12} scrollWheelZoom={false} className="site-map" key={sites.map(s => s.turbine_id).join('-')}>
-      <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {sites.map(site => <CircleMarker key={site.turbine_id} center={[site.latitude, site.longitude]} radius={selected === site.turbine_id ? 13 : 11} pathOptions={{ color: selected === site.turbine_id ? '#184f45' : '#fff', fillColor: selected === site.turbine_id ? '#b4e86a' : '#266f62', fillOpacity: 1, weight: 3 }} eventHandlers={{ click: () => onSelect(site.turbine_id) }}>
-        <Tooltip direction="top" offset={[0, -14]}>{site.turbine_id} · {site.coordinate_status} coordinates</Tooltip>
-        <Popup>{site.turbine_id} · {site.coordinate_status} coordinates</Popup>
-      </CircleMarker>)}
-    </MapContainer>
-    <span className="map-badge">FICTIONAL COORDINATES</span>
-  </div>
+  return ru.requestFailed
 }
 
 function Comparison({ current, previous }: { current: ForecastResult, previous: ForecastResult | null }) {
@@ -64,9 +32,9 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
   if (!overlap.length) return null
   const mean = overlap.reduce((sum, row) => sum + Math.abs(row.power_norm - prior.get(row.valid_at)!.power_norm), 0) / overlap.length
   const changed = overlap.filter(row => Math.abs(row.power_norm - prior.get(row.valid_at)!.power_norm) > 1e-12).length
-  return <section className="panel comparison"><div className="section-title"><span className="eyebrow">RUN COMPARISON</span><h3>What changed?</h3></div>
-    <p>{changed} of {overlap.length} overlapping hours changed. Mean absolute change: <strong>{pct(mean)}</strong> normalized power.</p>
-    <details><summary>Inspect overlapping hours</summary><div className="table-scroll"><table><thead><tr><th>Local hour</th><th>Previous</th><th>Current</th><th>Change</th></tr></thead><tbody>{overlap.map(row => <tr key={row.valid_at}><td>{localTime(row.valid_at)}</td><td>{pct(prior.get(row.valid_at)!.power_norm)}</td><td>{pct(row.power_norm)}</td><td>{((row.power_norm - prior.get(row.valid_at)!.power_norm) * 100).toFixed(1)} pp</td></tr>)}</tbody></table></div></details>
+  return <section className="panel comparison"><div className="section-title"><span className="eyebrow">{ru.comparison}</span><h3>{ru.whatChanged}</h3></div>
+    <p>{changed} из {overlap.length} {ru.overlapping} <strong>{percent(mean)}</strong> {ru.units}.</p>
+    <details><summary>{ru.inspectOverlap}</summary><div className="table-scroll"><table><thead><tr><th>{ru.localHour}</th><th>{ru.previous}</th><th>{ru.current}</th><th>{ru.change}</th></tr></thead><tbody>{overlap.map(row => <tr key={row.valid_at}><td>{localTime(row.valid_at, current.timezone)}</td><td>{percent(prior.get(row.valid_at)!.power_norm)}</td><td>{percent(row.power_norm)}</td><td>{signedPoints(row.power_norm - prior.get(row.valid_at)!.power_norm)}</td></tr>)}</tbody></table></div></details>
   </section>
 }
 
@@ -84,8 +52,10 @@ export default function App() {
   const [explanationError, setExplanationError] = useState('')
   const [loading, setLoading] = useState(false)
   const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState<Explanation | null>(null)
+  const [conversation, setConversation] = useState<{ question: string, answer: Explanation }[]>([])
+  const [pendingQuestion, setPendingQuestion] = useState('')
   const [questionError, setQuestionError] = useState('')
+  const [downloadError, setDownloadError] = useState('')
   const [asking, setAsking] = useState(false)
   const requestEpoch = useRef(0)
   const forecastController = useRef<AbortController | null>(null)
@@ -96,17 +66,18 @@ export default function App() {
     requestEpoch.current += 1
     forecastController.current?.abort()
     answerController.current?.abort()
-    setResult(null); setPrevious(null); setExplanation(null); setAnswer(null)
-    setError(''); setExplanationError(''); setQuestionError(''); setLoading(false); setAsking(false)
+    setResult(null); setPrevious(null); setExplanation(null); setConversation([]); setQuestion(''); setPendingQuestion('')
+    setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setAsking(false)
   }
 
   useEffect(() => {
     const controller = new AbortController()
     setSites([]); setSiteId(''); setSiteError('')
     getSites(mode, controller.signal).then(loaded => {
+      if (controller.signal.aborted) return
       setSites(loaded)
       if (loaded.length) setSiteId(loaded[0].turbine_id)
-      else setSiteError(mode === 'archive' ? 'Verified turbine coordinates are not configured for archive mode.' : 'No registered turbines are available.')
+      else setSiteError(mode === 'archive' ? ru.noArchiveSites : ru.noSites)
     }).catch(err => { if (!controller.signal.aborted) setSiteError(errorMessage(err)) })
     return () => controller.abort()
   }, [mode])
@@ -121,7 +92,7 @@ export default function App() {
     try {
       const forecast = await createForecast(input, controller.signal)
       if (epoch !== requestEpoch.current) return
-      if (forecast.status !== 'ok' || !forecast.forecast_id || !forecast.model_input || !forecast.hours?.length) throw new Error('Forecast response is incomplete.')
+      if (forecast.status !== 'ok' || !forecast.forecast_id || !forecast.model_input || !forecast.hours?.length) throw new Error(ru.incompleteForecast)
       setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id ? lastSuccess.current : null)
       lastSuccess.current = forecast
       setResult(forecast)
@@ -129,7 +100,7 @@ export default function App() {
       try {
         const prose = await explainForecast(forecast.forecast_id, controller.signal)
         if (epoch === requestEpoch.current) {
-          if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error('Explanation does not match this forecast.')
+          if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error(ru.staleExplanation)
           setExplanation(prose)
         }
       } catch (err) {
@@ -147,16 +118,34 @@ export default function App() {
     const controller = new AbortController()
     answerController.current = controller
     const epoch = requestEpoch.current
-    setAnswer(null); setQuestionError(''); setAsking(true)
+    const submitted = question.trim()
+    setPendingQuestion(submitted); setQuestion(''); setQuestionError(''); setAsking(true)
     try {
-      const response = await askQuestion(result.forecast_id, question.trim(), controller.signal)
+      const response = await askQuestion(result.forecast_id, submitted, controller.signal)
       if (epoch === requestEpoch.current && !controller.signal.aborted) {
-        if (response.forecast_fingerprint !== result.fingerprint) throw new Error('Answer does not match this forecast.')
-        setAnswer(response)
+        if (response.forecast_fingerprint !== result.fingerprint) throw new Error(ru.staleAnswer)
+        setConversation(current => [...current, { question: submitted, answer: response }])
+        setPendingQuestion('')
       }
     } catch (err) {
-      if (epoch === requestEpoch.current && !controller.signal.aborted) setQuestionError(errorMessage(err))
+      if (epoch === requestEpoch.current && !controller.signal.aborted) {
+        setQuestionError(errorMessage(err)); setPendingQuestion(''); setQuestion(submitted)
+      }
     } finally { if (epoch === requestEpoch.current && !controller.signal.aborted) setAsking(false) }
+  }
+
+  async function saveCsv(kind: 'forecast' | 'model-input') {
+    if (!result) return
+    const active = result
+    const epoch = requestEpoch.current
+    setDownloadError('')
+    try {
+      const blob = await downloadCsv(active.forecast_id, kind)
+      if (epoch !== requestEpoch.current) return
+      saveBlob(blob, kind === 'model-input' ? active.model_input.filename : `forecast-${active.turbine_id}-${active.origin.slice(0, 10)}-${active.horizon_hours}h.csv`)
+    } catch (err) {
+      if (epoch === requestEpoch.current) setDownloadError(errorMessage(err))
+    }
   }
 
   const selectedSite = sites.find(s => s.turbine_id === siteId)
@@ -164,40 +153,76 @@ export default function App() {
   const mean = result ? result.hours.reduce((sum, row) => sum + row.power_norm, 0) / result.hours.length : 0
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">◒</span><span>AEOLUS <small>LAB</small></span></div><div className="topbar-right"><span className="topbar-line" /><span>HISTORICAL REPLAY</span><span className="topbar-dot" /> LOCAL DEMO</div></header>
-    <main>
-      <div className="hero"><div><span className="eyebrow hero-kicker">WIND INTELLIGENCE / 01</span><h1>Power, <em>predicted.</em></h1><p>Explore hourly generation forecasts from measured turbine history and weather features. Advance the origin to see how the outlook shifts.</p></div><div className="hero-side"><span className="hero-orbit">✳</span><span>HOURLY<br />FORECAST<br />ENGINE</span></div></div>
-      <div className="notice"><span className="notice-icon">i</span><span>Demo weather and map coordinates are fictional. Turbine measurements and fitted regressors are real. All power values are normalized to [0, 1], not MW or MWh.</span></div>
-      <div className="workspace"><section className="panel setup-panel"><div className="section-title"><span className="eyebrow">01 / CONFIGURE</span><h2>Select your forecast</h2><p>Choose a registered turbine and a replay origin.</p></div>
-        <div className="field-label">REGISTERED TURBINE</div>
-        <SiteMap sites={sites} selected={siteId} onSelect={id => { if (id !== siteId) { invalidate(); setSiteId(id) } }} />
-        <div className="field-note">Marker locations are fictional fixtures. Map clicks only select registered turbines.</div>
-        <label className="field"><span>Turbine</span><select aria-label="Turbine" value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">Select turbine</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id} · {site.coordinate_status} location</option>)}</select></label>
-        {siteError && <div className="error-banner">{siteError}</div>}
-        <div className="field-grid"><label className="field"><span>Origin date</span><input aria-label="Origin date" type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label><label className="field"><span>Horizon</span><select aria-label="Horizon" value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>24 hours</option><option value={48}>48 hours</option></select></label></div>
-        <label className="field"><span>Weather source</span><select aria-label="Weather source" value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="fixture">Synthetic fixture</option><option value="archive">Verified archive</option></select></label>
-        <div className="origin-note">Forecast issued at 23:00 in {selectedSite?.timezone || LOCAL_ZONE} · {origin} UTC</div>
-        <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? 'Calculating forecast…' : 'Predict generation'} <span>↗</span></button>
-        {error && <div className="error-banner" role="alert">{error}</div>}
-      </section>
-      <section className="results-column"><div className="pipeline"><span>WEATHER</span><b>→</b><span>CSV FEATURES</span><b>→</b><span>POWER MODEL</span><b>→</b><span>EXPLANATION</span></div>
-        {!result && <div className="panel empty-state"><div className="empty-glyph">∿</div><span className="eyebrow">AWAITING FORECAST</span><h2>The next 48 hours, in view.</h2><p>Select a turbine and predict generation to inspect the hourly power curve, the exact model input CSV, and the analysis.</p></div>}
-        {result && <><section className="panel result-panel"><div className="result-heading"><div><span className="eyebrow">02 / FORECAST RESULT</span><h2>{result.turbine_id} generation outlook</h2><p>{localTime(result.origin)} local origin · {result.horizon_hours} hourly predictions · {result.weather_provenance.provenance_status} weather</p></div><span className="status-pill">● READY</span></div>
-          <div className="metrics"><div><span>MEAN POWER</span><strong>{pct(mean)}</strong><small>normalized output</small></div><div><span>PEAK POWER</span><strong>{pct(result.analysis.peak_power_norm)}</strong><small>{localTime(result.analysis.peak_at)} local</small></div><div><span>LOWEST POWER</span><strong>{pct(result.analysis.min_power_norm)}</strong><small>{localTime(result.analysis.min_at)} local</small></div></div>
-          <div className="chart-header"><h3>Hourly power curve</h3><div className="legend"><span><i className="legend-forecast" /> Forecast</span><span><i className="legend-baseline" /> Persistence baseline</span></div></div><PowerChart hours={result.hours} />
-          <div className="actions"><a href={downloadUrl(result.forecast_id, 'forecast')} download>↓ Download forecast CSV</a><a href={downloadUrl(result.forecast_id, 'model-input')} download>↓ Inspect model input CSV</a></div>
-          <div className="model-input"><span className="eyebrow">MODEL INPUT / {result.model_input.schema_version}</span><div><strong>{result.model_input.filename}</strong><span>{result.model_input.row_count} rows · {result.model_input.columns.join(', ')}</span></div><code>{result.model_input.sha256}</code></div>
+    <header className="page-header">
+      <div><h1>{ru.pageTitle}</h1><p>{ru.pageSubtitle}</p></div>
+      <span className="mode-badge"><i />{mode === 'fixture' ? ru.fixture : ru.archive}</span>
+    </header>
+    <main className="workspace">
+      <aside className="setup-column" aria-label={ru.selectForecast}>
+        <section className="panel setup-panel">
+          <div className="section-title"><h2>{ru.selectForecast}</h2></div>
+          <SiteMap sites={sites} selected={siteId} onSelect={id => { if (id !== siteId) { invalidate(); setSiteId(id) } }} />
+          <label className="field"><span>{ru.turbine}</span><select aria-label={ru.turbine} value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">{ru.chooseTurbine}</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id}</option>)}</select></label>
+          {selectedSite && <div className="site-meta"><span>{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.latitude)} · {new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.longitude)}</span><small>{coordinateLabel(selectedSite.coordinate_status)}</small>{selectedSite.coordinate_source && <a href={selectedSite.coordinate_source} target="_blank" rel="noreferrer">{ru.openMap} ↗</a>}</div>}
+          {siteError && <div className="error-banner" role="alert">{siteError}</div>}
+          <div className="field-grid">
+            <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>
+            <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
+          </div>
+          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="fixture">{ru.fixture}</option><option value="archive">{ru.archive}</option></select></label>
+          <p className="origin-note">{date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
+          <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? ru.calculating : ru.predict}</button>
+          {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
-        <section className="panel analysis-panel"><div className="section-title"><span className="eyebrow">03 / ANALYSIS</span><h3>What the forecast says</h3></div>{explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `AI explanation${explanation.model ? ` · ${explanation.model}` : ''}` : 'Computed template explanation'}</div>{explanation.warning && <div className="warning-banner">{explanation.warning}</div>}</> : explanationError ? <div className="warning-banner">Explanation unavailable: {explanationError}</div> : <p className="muted">Preparing explanation…</p>}
-          {result.analysis.warnings.length > 0 && <div className="analysis-warnings">{result.analysis.warnings.map(warning => <span key={warning}>• {warning}</span>)}</div>}
-          <form className="question-form" onSubmit={submitQuestion}><label htmlFor="forecast-question">Ask about this forecast</label><div><input id="forecast-question" value={question} onChange={e => setQuestion(e.target.value)} placeholder="What explains the peak hour?" maxLength={500} /><button disabled={asking || !question.trim()}>{asking ? 'Asking…' : 'Ask ↗'}</button></div></form>
-          {answer && <div className="answer"><span className="eyebrow">ANSWER · {answer.backend === 'llm' ? 'AI' : 'COMPUTED TEMPLATE'}</span><p>{answer.text}</p>{answer.warning && <div className="warning-banner">{answer.warning}</div>}</div>}{questionError && <div className="error-banner">{questionError}</div>}
-        </section>
-        <Comparison current={result} previous={previous} />
-        <section className="panel detail-panel"><details><summary>Hourly data <span>{result.hours.length} rows</span></summary><div className="table-scroll"><table><thead><tr><th>Local hour</th><th>Lead</th><th>Wind m/s</th><th>Temp °C</th><th>Power</th><th>Baseline</th></tr></thead><tbody>{result.hours.map(hour => <tr key={hour.valid_at}><td>{localTime(hour.valid_at)}</td><td>{hour.lead_hour}</td><td>{hour.wind_speed_ms.toFixed(1)}</td><td>{hour.temperature_c.toFixed(1)}</td><td>{pct(hour.power_norm)}</td><td>{pct(hour.baseline_norm)}</td></tr>)}</tbody></table></div></details><details><summary>Provenance &amp; executed steps <span>{result.trace.length} steps</span></summary><div className="provenance"><div><strong>Weather run</strong><span>{result.run_id}</span></div><div><strong>Model</strong><span>{result.model_id}</span></div><div><strong>Training cutoff</strong><span>{result.train_last_interval_start}</span></div><div><strong>Cached result</strong><span>{result.cache_hit ? 'Yes' : 'No'}</span></div>{Object.entries(result.weather_provenance).map(([key, value]) => <div key={key}><strong>{key.replaceAll('_', ' ')}</strong><span>{String(value)}</span></div>)}</div><ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{step.status}</span><strong>{step.step.replaceAll('_', ' ')}</strong><small>{step.detail}</small></li>)}</ol></details></section>
-        <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>Advance one day &amp; recalculate <span>→</span></button>
+        <p className="scope-note">{ru.notice}</p>
+      </aside>
+      <div className="results-column">
+        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? ru.calculating : ru.emptyTitle}</h2><p>{loading ? ru.loadingHint : ru.emptyText}</p></section>}
+        {result && <>
+          <section className="panel result-panel">
+            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div>
+            <div className="metrics">
+              <div><span>{ru.meanPower}</span><strong>{percent(mean)}</strong><small>{ru.normalized}</small></div>
+              <div><span>{ru.peakPower}</span><strong>{percent(result.analysis.peak_power_norm)}</strong><small>{localTime(result.analysis.peak_at, result.timezone)}</small></div>
+              <div><span>{ru.lowestPower}</span><strong>{percent(result.analysis.min_power_norm)}</strong><small>{localTime(result.analysis.min_at, result.timezone)}</small></div>
+            </div>
+            <PowerChart key={result.forecast_id} result={result} />
+            {downloadError && <div className="error-banner" role="alert">{downloadError}</div>}
+          </section>
+          <section className="panel analysis-panel" aria-labelledby="analysis-heading">
+            <div className="section-title"><h2 id="analysis-heading">{ru.analysisTitle}</h2><p>{ru.chatHint}</p></div>
+            <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
+              <div className="chat-message assistant-message">
+                <span className="message-author">{ru.analysisAuthor}</span>
+                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
+              </div>
+              {conversation.map((exchange, index) => <div className="chat-exchange" key={index}>
+                <div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{exchange.question}</p></div>
+                <div className="chat-message assistant-message"><span className="message-author">{exchange.answer.backend === 'llm' ? ru.aiExplanation : ru.computed}</span><p>{exchange.answer.text}</p>{exchange.answer.warning && <p className="message-warning">{exchange.answer.warning}</p>}</div>
+              </div>)}
+              {pendingQuestion && <><div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{pendingQuestion}</p></div><p className="muted loading-status" role="status">{ru.asking}</p></>}
+            </div>
+            <form className="question-form" onSubmit={submitQuestion}>
+              <label htmlFor="forecast-question">{ru.askLabel}</label>
+              <textarea id="forecast-question" value={question} onChange={e => { setQuestionError(''); setQuestion(e.target.value) }} placeholder={ru.askPlaceholder} maxLength={500} rows={2} />
+              <div className="question-actions"><span>{ru.questionHint}</span><button className="primary-button" disabled={asking || !question.trim()}>{asking ? ru.asking : ru.ask}</button></div>
+            </form>
+            {questionError && <div className="error-banner" role="alert">{questionError}</div>}
+          </section>
+          <Comparison current={result} previous={previous} />
+          <section className="panel detail-panel">
+            <details><summary>{ru.hourlyData} <span>{result.hours.length} {ru.rows}</span></summary><div className="table-scroll"><table><thead><tr><th>{ru.localHour}</th><th>{ru.lead}</th><th>{ru.wind}</th><th>{ru.temperature}</th><th>{ru.power}</th><th>{ru.baseline}</th></tr></thead><tbody>{result.hours.map(hour => <tr key={hour.valid_at}><td>{localTime(hour.valid_at, result.timezone)}</td><td>{hour.lead_hour}</td><td>{decimal(hour.wind_speed_ms)}</td><td>{decimal(hour.temperature_c)}</td><td>{percent(hour.power_norm)}</td><td>{percent(hour.baseline_norm)}</td></tr>)}</tbody></table></div></details>
+            <details><summary>{ru.technicalDetails}</summary>
+              <div className="model-input"><div><h3>{ru.modelInput}</h3><button type="button" className="secondary-button" onClick={() => saveCsv('model-input')}>{ru.downloadInput}</button></div><p>{result.model_input.row_count} {ru.rows} · {result.model_input.schema_version}</p><code>{result.model_input.columns.join(', ')}</code><p className="file-hash">SHA-256: {result.model_input.sha256}</p></div>
+              {result.analysis.warnings.length > 0 && <ul className="analysis-warnings">{result.analysis.warnings.map(warning => <li key={warning}>{warningLabel(warning)}</li>)}</ul>}
+              <div className="provenance"><div><strong>{ru.weatherRun}</strong><span>{result.run_id}</span></div><div><strong>{ru.model}</strong><span>{result.model_id}</span></div><div><strong>{ru.trainingCutoff}</strong><span>{localTime(result.train_last_interval_start, result.timezone)}</span></div><div><strong>{ru.cached}</strong><span>{result.cache_hit ? ru.yes : ru.no}</span></div>{Object.entries(result.weather_provenance).map(([key, value]) => <div key={key}><strong>{fieldLabel(key)}</strong><span>{provenanceValue(key, String(value), result.timezone)}</span></div>)}</div>
+              <ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{statusLabel(step.status)}</span><strong>{stepLabel(step.step)}</strong><small>{traceDetail(step.step, step.detail)}</small></li>)}</ol>
+            </details>
+          </section>
+          <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>{ru.advance} →</button>
         </>}
-      </section></div>
-    </main><footer><span>AEOLUS LAB / HISTORICAL REPLAY</span><span>MEASURED TURBINES · SYNTHETIC WEATHER · NORMALIZED POWER</span></footer>
+      </div>
+    </main>
+    <footer>{ru.footer}</footer>
   </div>
 }

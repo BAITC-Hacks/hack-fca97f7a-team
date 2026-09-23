@@ -1,11 +1,12 @@
 import type { ApiError, Explanation, ForecastRequest, ForecastResult, Site } from './types'
+import { apiErrors, ru } from './ru'
 
 export class ApiFailure extends Error {
   code: string
   trace: ApiError['trace']
 
   constructor(error: ApiError) {
-    super(error.message)
+    super(apiErrors[error.code] || ru.requestFailed)
     this.name = 'ApiFailure'
     this.code = error.code
     this.trace = error.trace
@@ -13,16 +14,22 @@ export class ApiFailure extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api${path}`, options)
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, options)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new Error(ru.networkError)
+  }
   let body: unknown
   try {
     body = await response.json()
   } catch {
-    throw new Error(`Server returned ${response.status} without a JSON response.`)
+    throw new Error(ru.invalidServerResponse)
   }
   if (!response.ok || (body && typeof body === 'object' && 'status' in body && body.status === 'error')) {
     const error = body as ApiError
-    throw new ApiFailure({ status: 'error', code: error.code || 'REQUEST_FAILED', message: error.message || `Request failed (${response.status}).`, trace: error.trace })
+    throw new ApiFailure({ status: 'error', code: error.code || 'REQUEST_FAILED', message: error.message || ru.requestFailed, trace: error.trace })
   }
   return body as T
 }
@@ -47,4 +54,18 @@ export function askQuestion(id: string, question: string, signal?: AbortSignal):
 
 export function downloadUrl(id: string, kind: 'forecast' | 'model-input'): string {
   return `/api/forecasts/${encodeURIComponent(id)}/download?kind=${kind}`
+}
+
+export async function downloadCsv(id: string, kind: 'forecast' | 'model-input'): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(downloadUrl(id, kind))
+  } catch {
+    throw new Error(ru.networkError)
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as ApiError | null
+    throw new ApiFailure({ status: 'error', code: body?.code || 'REQUEST_FAILED', message: body?.message || ru.requestFailed, trace: body?.trace })
+  }
+  return response.blob()
 }

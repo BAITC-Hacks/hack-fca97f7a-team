@@ -1,24 +1,21 @@
 # Wind power forecast — React + FastAPI
 
-Implementation backlog for three developers: [tasks.md](tasks.md). The demo must
-be fully in Russian; localization is tracked there as required remaining work.
-For source hashes, excluded hours, feature units, model evaluation and remaining
-data assumptions, see [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md) and
-[EVALUATION_REPORT.md](EVALUATION_REPORT.md). The module
-interfaces are defined in [CONTRACTS.md](CONTRACTS.md).
+Implementation backlog for three developers: [tasks.md](tasks.md). The active
+React demo has a Russian user interface and Russian explanation fallback.
 
 The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
-Both turbine models are trained from their separate real datasets. Weather and
-map coordinates are still labeled fixtures. OpenAI explanation and forecast
+Both turbine models are trained from their separate real datasets. Weather is
+still a labeled fixture; map coordinates come from the user's Google Maps links.
+OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
 ## Run the app
 
-Requires Python **3.12+** (integration tested on 3.14.7) and Node **22+**.
+Requires Python **3.12+** (tested 3.14.4) and Node **22+**.
 
 ```sh
 python -m venv .venv
@@ -62,19 +59,22 @@ The backend uses the OpenAI Responses API with an 8-second timeout and no automa
 retries. Numeric forecasts appear first. Missing key, timeout or provider failure
 returns a labeled local answer; it does not discard or change the forecast.
 
-## Demo
+## Демонстрация за 2–3 минуты
 
-1. Select T1/T2 on the map or selector. Keep January 31, 2026 and 48 hours.
-2. Click **Predict generation**. Inspect the power chart and hourly table.
-3. Click **Inspect model input CSV** to download the exact file the predictor read.
-4. Read the explanation; its label distinguishes OpenAI from computed fallback.
-5. Ask: **Which six-hour period has the highest average output?** The window is
-   calculated locally and supplied to the explanation model.
-6. Click **Advance one day & recalculate** to compare overlapping target hours.
+Согласованный минималистичный дизайн описан в [frontend/DESIGN.md](frontend/DESIGN.md).
 
-Fixture weather exists only for January 31 and February 1 at 23:00 Asia/Almaty.
-Other origins return an explicit error. Archive mode reports unavailable until
-verified coordinates/weather are integrated. Input changes clear stale results.
+1. Откройте приложение. Слева — карта с координатами пользователя и параметры, справа — прогноз, под ним — анализ и чат. Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty. Погода остаётся демонстрационной.
+2. Нажмите **«Сформировать прогноз»**. Покажите график нормализованной мощности и раздел «Почасовые данные». Числовой результат появляется до объяснения.
+3. Нажмите **«Скачать прогноз CSV»** в панели результата. Под графиком доступны **PNG** (2200 × 840) и **SVG** с датой, турбиной, часовым поясом и легендой. В разделе **«Данные и метод расчёта»** нажмите **«Скачать входной CSV»** — это точный файл, прочитанный моделью.
+4. Покажите пометку «Объяснение ИИ» или «Расчётное объяснение — ИИ недоступен». Спросите: **«В какие шесть часов средняя мощность максимальна?»**. Шестичасовое среднее вычисляет сервер.
+5. Нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
+6. Для проверки ошибок выберите «Проверенный архив» и нажмите «Сформировать прогноз»: появится сообщение о недоступной погоде. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
+
+Сохранённая демонстрационная погода доступна только для 31 января и 1 февраля,
+23:00 Asia/Almaty. Карта загружает тайлы из сети; турбину всегда можно выбрать
+из списка. Режим архива заработает после подключения проверенной архивной
+погоды. Повторный запуск сервера удаляет сохранённые ID прогнозов; сформируйте
+прогноз заново.
 
 ## The module seams
 
@@ -114,9 +114,8 @@ Assume ten-minute interval starts in Asia/Almaty. Drop/report ambiguous local
 times and incomplete hours. Each retained hour averages six complete samples.
 Zero-power observations are retained. Generated data/audits are under ignored
 `data/canonical/`; models and inference CSVs are under ignored `artifacts/`.
-The audit records source hashes, ambiguous clock rows and missing ten-minute
-slots; the measured wind height is still unknown. The current synthetic weather
-does not supply a verified wind height, so no height conversion is applied.
+The source hashes, clock exclusions and feature assumptions are recorded in
+[DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md).
 
 | Turbine | Complete hourly observations | Frozen training hours |
 |---|---:|---:|
@@ -129,26 +128,33 @@ for the next origin; February labels/observed weather cannot enter the predictor
 
 Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
 normalization denominator and source timestamp convention still need confirmation.
-No farm total, calibrated uncertainty or end-to-end forecast accuracy claim
-without as-issued weather and matching held-out truth.
-Map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
+No farm total or calibrated uncertainty is available. The measured-weather
+holdout in [EVALUATION_REPORT.md](EVALUATION_REPORT.md) assesses the regressor;
+it does not establish accuracy using weather available at a forecast origin.
+Координаты и соответствие турбин подтверждены пользователем:
+
+| Турбина | Широта | Долгота | Источник |
+|---|---:|---:|---|
+| T1 | 43.645150 | 78.535604 | [Google Maps](https://maps.app.goo.gl/iN6svMt69D5qRpFU9) |
+| T2 | 43.643198 | 78.538828 | [Google Maps](https://maps.app.goo.gl/8UQMwsYavY6nLvFY8) |
+
+API помечает их как `user_provided` и возвращает исходную ссылку в
+`coordinate_source`. Это не меняет статус демонстрационных погодных данных.
 
 ## Validation
 
 ```sh
 python -m pytest -q
 npm --prefix frontend run build
+python -m scripts.evaluate
 ```
 
-For a reproducible chronological diagnostic using measured wind and temperature,
-run `python -m scripts.evaluate`. Its MAE/RMSE/R² and baseline comparison are in
-[EVALUATION_REPORT.md](EVALUATION_REPORT.md). These scores do not measure a
-forecast using as-issued weather; the real provider and February truth are absent.
+The evaluation reports MAE/RMSE/R² for both turbines and 24/48-hour windows,
+compared with origin-refreshed persistence. It uses future-hour *measured* wind
+and temperature; see [EVALUATION_REPORT.md](EVALUATION_REPORT.md) before citing
+the scores.
 
-The merged integration passed **49 Python tests** and the React TypeScript/Vite
-build. An isolated training run reproduced the original T1/T2 model IDs, and
-eight offline FastAPI forecasts covered both turbines, both fixture origins and
-both horizons while downloading the exact model-input CSV. The Python suite covers
+The Python suite and React TypeScript/Vite build cover
 CSV consumption/integrity, chronology, source identities, input/output validation,
 cache, HTTP/downloads, stored forecast context, summary fallback and legacy UI.
 Tests clear OPENAI_API_KEY and mock SDK responses; they spend no API credits.
@@ -156,18 +162,46 @@ FastAPI TestClient needs local socket permissions in restricted environments.
 
 One explicitly user-approved live test succeeded with `gpt-5.4-mini`: 24 generated
 T2 weather rows → real CSV inference → LLM explanation, with no fallback. No raw
-training CSV was sent. The React browser smoke test used an empty key and passed forecast rendering,
-48-row model-input CSV download, a six-hour-window question, next-day comparison,
-and the JavaScript error check (none).
+training CSV was sent. An earlier React browser smoke test used an empty key and
+passed forecast rendering, 48-row model-input CSV download, a six-hour-window
+question, next-day comparison, and the JavaScript error check (none).
+
+The minimal Russian UI was also checked in Chromium with an empty OpenAI key:
+T1/T2 × 24/48 hours, forecast/model-input CSV downloads, PNG (2200 × 840), SVG,
+two-question chat history, real weather-unavailable errors and retry, input
+invalidation, and a 390-pixel mobile viewport. Missing forecast IDs and delayed
+explanations were simulated in the browser to check recovery and stale responses.
+No JavaScript errors or paid OpenAI requests occurred.
 
 ## Remaining work
 
-- Resolve actual turbine coordinates and verify as-issued archived weather access.
+- Verify as-issued archived weather access for the user-supplied turbine coordinates.
 - Implement February replay over all 28 daily origins and both turbines.
 - Validate feature mismatch between measured training weather and forecast inputs.
-- Confirm measured and provider wind heights before attempting any height conversion.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
-The current app is a working demo with explicit weather/location stubs, not a
+The current app is a working demo with explicit synthetic weather and user-supplied coordinates, not a
 claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.
+
+## Интеграция MLmodel
+
+Обучение `python -m scripts.train --mode fixture` теперь также создаёт январскую
+диагностику отдельно для T1/T2: `artifacts/training/T1_metrics.json` и
+`T2_metrics.json`, плюс CSV с фактом и прогнозом. `--skip-validation` пропускает
+только диагностику. Она использует измеренную погоду и не оценивает качество
+реального прогноза погоды на 24/48 часов; baseline заморожен на весь январь.
+
+Модели сохраняются в `artifacts/models/<турбина>/<хэш>/`, активные версии — в
+`latest.json`. Старые локальные `T1.pkl`/`T2.pkl` читаются при отсутствии реестра;
+переобучение переводит проект на новый формат. Внешний контракт
+`load_model("T1")` и обязательный CSV-вход сохранены. После обучения:
+
+```sh
+python -m scripts.smoke_model --models-dir artifacts/models
+```
+
+Команда проверяет восемь синтетических сценариев через реальное чтение CSV.
+
+Проверка объединённой ветки: 58 тестов, сборка React и 8 CSV smoke-сценариев прошли.
+Январский MAE: T1 — 0,02373; T2 — 0,02592 (нормализованные доли, измеренная погода).
