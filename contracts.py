@@ -69,7 +69,7 @@ def utc_time(value: str) -> datetime:
             raise ValueError("UTC offset required")
         return result.astimezone(timezone.utc)
     except (ValueError, TypeError, AttributeError) as exc:
-        raise ForecastError("INVALID_INPUT", f"Expected UTC timestamp, got {value!r}.") from exc
+        raise ForecastError("INVALID_INPUT", "Укажите корректное время UTC (например, 2026-01-31T18:00:00Z).") from exc
 
 
 def iso(value: datetime) -> str:
@@ -78,18 +78,18 @@ def iso(value: datetime) -> str:
 
 def validate_request(request: dict) -> ForecastRequest:
     if not isinstance(request, dict) or set(request) != {"turbine_id", "origin", "horizon_hours", "mode"}:
-        raise ForecastError("INVALID_INPUT", "Request must contain turbine_id, origin, horizon_hours and mode.")
+        raise ForecastError("INVALID_INPUT", "Укажите турбину, дату начала, горизонт и режим прогноза.")
     if request["turbine_id"] not in SITE_IDS:
-        raise ForecastError("INVALID_INPUT", "Select a registered turbine (T1 or T2).")
+        raise ForecastError("INVALID_INPUT", "Выберите зарегистрированную турбину T1 или T2.")
     if type(request["horizon_hours"]) is not int or request["horizon_hours"] not in (24, 48):
-        raise ForecastError("INVALID_INPUT", "Horizon must be 24 or 48 hours.")
+        raise ForecastError("INVALID_INPUT", "Выберите горизонт 24 или 48 часов.")
     if request["mode"] not in ("fixture", "archive"):
-        raise ForecastError("INVALID_INPUT", "Mode must be fixture or archive.")
+        raise ForecastError("INVALID_INPUT", "Выберите режим fixture или archive.")
     origin = utc_time(request["origin"])
     if origin.minute or origin.second or origin.microsecond:
-        raise ForecastError("INVALID_INPUT", "Forecast origin must be aligned to a UTC hour.")
+        raise ForecastError("INVALID_INPUT", "Укажите начало прогноза по целому часу UTC.")
     if origin < utc_time(FIRST_ORIGIN):
-        raise ForecastError("INVALID_INPUT", "Origin precedes the frozen model cutoff; retrain for earlier origins.")
+        raise ForecastError("INVALID_INPUT", "Дата начала раньше отсечки обучения; выберите более позднюю дату.")
     return {**request, "origin": iso(origin)}
 
 
@@ -105,7 +105,7 @@ def fingerprint(value: object) -> str:
 
 def forecast_csv(result: dict) -> str:
     if result.get("status") != "ok":
-        raise ForecastError("INVALID_INPUT", "Only successful forecasts can be exported.")
+        raise ForecastError("INVALID_INPUT", "Скачать можно только готовый прогноз.")
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=CSV_FIELDS)
     writer.writeheader()

@@ -87,7 +87,7 @@ def _status_for(code: str) -> int:
 
 @app.exception_handler(RequestValidationError)
 def _validation_error(_request: Request, _exc: RequestValidationError) -> JSONResponse:
-    return _error(422, "INVALID_INPUT", "Request body or parameters are invalid.")
+    return _error(422, "INVALID_INPUT", "Проверьте параметры запроса: турбину, дату, горизонт и режим.")
 
 
 @app.get("/api/health")
@@ -112,13 +112,13 @@ def create_forecast(body: ForecastBody):
         if status == 500 or (isinstance(message, str) and message.startswith("Forecast input or tool failed:")):
             code = "INTERNAL_ERROR"
             status = 500
-            message = "Forecast processing failed."
-        return _error(status, code, str(message or "Forecast could not be completed."), result.get("trace"))
+            message = "Не удалось выполнить прогноз; проверьте данные и повторите попытку."
+        return _error(status, code, str(message or "Не удалось выполнить прогноз; повторите попытку."), result.get("trace"))
 
     fingerprint = result.get("fingerprint", "")
     forecast_id = fingerprint.removeprefix("sha256:")
     if not re.fullmatch(r"[0-9a-f]{64}", forecast_id):
-        return _error(500, "INTERNAL_ERROR", "Forecast returned an invalid identifier.", result.get("trace"))
+        return _error(500, "INTERNAL_ERROR", "Неверный идентификатор прогноза; создайте прогноз заново.", result.get("trace"))
     stored = copy.deepcopy(result)
     with _FORECASTS_LOCK:
         _FORECASTS[forecast_id] = stored
@@ -131,7 +131,7 @@ def create_forecast(body: ForecastBody):
 def _get_forecast(forecast_id: str) -> dict:
     if not re.fullmatch(r"[0-9a-f]{64}", forecast_id):
         raise HTTPException(status_code=404, detail={
-            "status": "error", "code": "NOT_FOUND", "message": "Forecast was not found.", "trace": []
+            "status": "error", "code": "NOT_FOUND", "message": "Прогноз не найден; создайте его заново.", "trace": []
         })
     with _FORECASTS_LOCK:
         result = _FORECASTS.get(forecast_id)
@@ -139,7 +139,7 @@ def _get_forecast(forecast_id: str) -> dict:
             _FORECASTS.move_to_end(forecast_id)
             return copy.deepcopy(result)
     raise HTTPException(status_code=404, detail={
-        "status": "error", "code": "NOT_FOUND", "message": "Forecast was not found.", "trace": []
+        "status": "error", "code": "NOT_FOUND", "message": "Прогноз не найден; создайте его заново.", "trace": []
     })
 
 
@@ -164,24 +164,24 @@ def download_forecast(
 
     metadata = result.get("model_input")
     if not isinstance(metadata, dict):
-        return _error(404, "NOT_FOUND", "Model input CSV is unavailable for this forecast.")
+        return _error(404, "NOT_FOUND", "Входной CSV недоступен; создайте прогноз заново.")
     filename = metadata.get("filename")
     if (metadata.get("schema_version") != "weather-features-v1"
             or metadata.get("row_count") not in (24, 48)
             or metadata.get("columns") != ["turbine_id", "valid_at", "wind_speed_ms", "temperature_c"]
             or not isinstance(filename, str)
             or not re.fullmatch(r"[0-9a-f]{64}\.csv", filename)):
-        return _error(404, "NOT_FOUND", "Model input CSV is unavailable for this forecast.")
+        return _error(404, "NOT_FOUND", "Входной CSV недоступен; создайте прогноз заново.")
     base = (artifact_dir() / "model_inputs").resolve()
     path = (base / filename).resolve()
     if path.parent != base or not path.is_file():
-        return _error(404, "NOT_FOUND", "Model input CSV is unavailable for this forecast.")
+        return _error(404, "NOT_FOUND", "Входной CSV недоступен; создайте прогноз заново.")
     try:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
-        return _error(404, "NOT_FOUND", "Model input CSV is unavailable for this forecast.")
+        return _error(404, "NOT_FOUND", "Входной CSV недоступен; создайте прогноз заново.")
     if digest != metadata.get("sha256") or digest != filename[:-4]:
-        return _error(422, "DATA_INVALID", "Saved model input failed its integrity check.")
+        return _error(422, "DATA_INVALID", "Входной CSV повреждён; создайте прогноз заново.")
     return FileResponse(path, media_type="text/csv", filename=filename)
 
 
@@ -191,7 +191,7 @@ def explain_forecast(forecast_id: str, body: ExplanationBody):
     try:
         return summarize_forecast(result, backend=body.backend)
     except Exception:
-        return _error(500, "EXPLANATION_FAILED", "Forecast summary could not be generated.")
+        return _error(500, "EXPLANATION_FAILED", "Не удалось получить объяснение; повторите запрос.")
 
 
 @app.post("/api/forecasts/{forecast_id}/questions")
@@ -200,12 +200,12 @@ def ask_forecast(forecast_id: str, body: QuestionBody):
     try:
         return answer_question(result, body.question, backend=body.backend)
     except Exception:
-        return _error(500, "EXPLANATION_FAILED", "Forecast question could not be answered.")
+        return _error(500, "EXPLANATION_FAILED", "Не удалось ответить на вопрос; повторите запрос.")
 
 
 @app.api_route("/api/{api_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 def unknown_api_route(api_path: str) -> JSONResponse:
-    return _error(404, "NOT_FOUND", "API endpoint was not found.")
+    return _error(404, "NOT_FOUND", "Адрес API не найден; проверьте ссылку.")
 
 
 _frontend_dist = ROOT / "frontend" / "dist"

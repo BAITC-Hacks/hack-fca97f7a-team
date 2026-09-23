@@ -27,7 +27,7 @@ def test_registered_fixture_sites_and_runs():
 
 def test_archive_never_uses_fixtures():
     assert load_sites("archive") == load_sites("fixture")
-    with pytest.raises(ForecastError, match="archived weather") as error:
+    with pytest.raises(ForecastError, match="Архив недоступен") as error:
         fetch_weather(load_sites()[0], ORIGINS[0], 24, "archive")
     assert error.value.code == "WEATHER_UNAVAILABLE"
     with pytest.raises(ForecastError) as error:

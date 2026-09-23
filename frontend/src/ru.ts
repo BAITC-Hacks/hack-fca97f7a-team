@@ -81,6 +81,7 @@ export function provenanceValue(key: string, value: string, zone: string): strin
   return provenanceLabel(value)
 }
 export function warningLabel(warning: string): string {
+  if (/[А-Яа-яЁё]/.test(warning)) return warning
   if (warning.includes('Real turbine training data; synthetic weather')) return 'Модель обучена на реальных данных турбины; погода демонстрационная.'
   if (warning.includes('Timezone and interval semantics assumed')) return 'Часовой пояс и начало интервалов исходных данных приняты по допущению.'
   const clipping = warning.match(/^(\d+) model predictions clipped/)

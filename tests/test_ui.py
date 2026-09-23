@@ -60,13 +60,16 @@ def test_marker_identity_and_background_click(monkeypatch):
 
 def test_archive_mode_does_not_display_fixture_forecast(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "archive")
+    monkeypatch.delenv("OPEN_METEO_ARCHIVE_MANIFEST", raising=False)
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: {"last_object_clicked": None})
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
     assert not app.exception
+    assert app.selectbox(key="selected_site").options == ["Choose a turbine", "T1", "T2"]
     app.selectbox(key="selected_site").select("T1").run()
     app.button(key="predict").click().run()
+    assert not app.exception
     assert "result" not in app.session_state
-    assert any("WEATHER_UNAVAILABLE" in item.value for item in app.error)
+    assert app.session_state["_forecast_error"]["code"] == "WEATHER_UNAVAILABLE"
 
 
 def test_summary_stub_keeps_real_forecast(ui, monkeypatch):
@@ -76,4 +79,4 @@ def test_summary_stub_keeps_real_forecast(ui, monkeypatch):
     assert not ui.exception
     assert ui.session_state["result"]["status"] == "ok"
     assert ui.session_state["summary"]["backend"] == "template"
-    assert "не настроен" in ui.session_state["summary"]["warning"]
+    assert "Ключ OpenAI не настроен" in ui.session_state["summary"]["warning"]
