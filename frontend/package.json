@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "typecheck": "tsc --noEmit",
-    "test:scene": "node --test src/experience/weather.test.mjs"
+    "dev": "vite --host 127.0.0.1",
+    "test:scene": "node --test src/experience/weather.test.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
@@ -15,6 +15,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-leaflet": "^5.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "three": "^0.186.0"
   },
   "devDependencies": {

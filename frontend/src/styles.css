@@ -123,3 +123,26 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .samal-launcher { background: #213d35; border-color: #dedec4; backdrop-filter: none; }
 }
+
+/* Markdown answers and structured chat tables brought forward from main. */
+.chat-table{max-width:100%;margin:12px 0 0}.chat-table table{width:auto;min-width:100%}.chat-table caption{text-align:left;color:#5d7265;font-size:11px;font-weight:600;padding:0 0 6px}.chat-table th,.chat-table td{white-space:nowrap}
+.chat-messages{max-height:none;overflow:visible}.assistant-message{width:100%;max-width:100%;min-width:0}.answer-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 9px;margin:0 0 10px;font-size:10px;font-weight:600;line-height:1.5}.answer-badge-llm{color:#24543b;background:#e9f5eb}.answer-badge-computed{color:#6d6545;background:#f5f2e7}.assistant-prose{color:#34493b;font-size:13px;line-height:1.65;overflow-wrap:anywhere}.assistant-prose>*{max-width:72ch}.assistant-prose>*+*{margin-top:10px}.assistant-prose p{white-space:normal}.assistant-prose h1,.assistant-prose h2,.assistant-prose h3,.assistant-prose h4{color:#263f30;font-size:14px;font-weight:650;line-height:1.4}.assistant-prose strong{font-weight:650;color:#263f30}.assistant-prose ul,.assistant-prose ol{padding-left:20px;margin-bottom:0}.assistant-prose li+li{margin-top:4px}.assistant-prose li>p{margin:0}.assistant-prose blockquote{border-left:3px solid #b9d4bd;padding-left:12px;margin-left:0;color:#596d5d}.assistant-prose code{background:#f0f5f0;border-radius:3px;padding:1px 4px;font-size:12px}.assistant-prose pre{overflow:auto;background:#f0f5f0;border-radius:6px;padding:10px}.assistant-prose pre code{padding:0}.assistant-prose .markdown-table{max-width:100%;margin-bottom:0}.assistant-prose .markdown-table table{width:auto;min-width:100%}.answer-notes{max-width:72ch;margin-top:14px;padding:10px 12px;background:#f8f9f5;border-left:3px solid #cbd5c1;border-radius:0 5px 5px 0;color:#677466;font-size:11px;line-height:1.55}.answer-notes strong{font-weight:600;color:#596857}.answer-notes ul{margin:4px 0 0;padding-left:16px}.answer-notes li+li{margin-top:3px}.message-warning{max-width:72ch;margin-top:10px!important;padding:7px 9px;border-radius:5px;background:#fff8ed;color:#785d34!important;white-space:normal!important}.chat-table{max-width:100%}
+.answer-selection{max-width:72ch;margin-top:10px!important;color:#506657;font-size:11px;line-height:1.6;white-space:normal!important}.answer-selection strong{font-weight:600}
+
+/* Keep the imported answer renderer legible inside Samal's dark panel. */
+.assistant-panel .assistant-prose { color: #d7e1d1; font-size: 12px; }
+.assistant-panel .assistant-prose h1,
+.assistant-panel .assistant-prose h2,
+.assistant-panel .assistant-prose h3,
+.assistant-panel .assistant-prose h4,
+.assistant-panel .assistant-prose strong { color: #f0ead6; }
+.assistant-panel .assistant-prose blockquote { color: #bdcebb; border-color: #91aa92; }
+.assistant-panel .assistant-prose code,
+.assistant-panel .assistant-prose pre { background: #dce9d110; color: #e4ebd8; }
+.assistant-panel .answer-badge-llm { background: #c3e5c51c; color: #c7e2bf; }
+.assistant-panel .answer-badge-computed { background: #eee1ad16; color: #e4d4a4; }
+.assistant-panel .answer-notes { background: #d2e0c60b; color: #bdcbb7; border-color: #93a58a; }
+.assistant-panel .answer-notes strong,
+.assistant-panel .answer-selection,
+.assistant-panel .chat-table caption { color: #d1dfc7; }
+.assistant-panel .message-warning { background: #e4c68f12; color: #e4c99c!important; }

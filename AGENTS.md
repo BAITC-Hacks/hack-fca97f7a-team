@@ -154,3 +154,11 @@ CSV or explanation inputs; evaluation baselines remain internal.
 Follow TEAM_WORKFLOW.md for branch integration and DEMO_CHECKLIST.md for browser
 checks. scripts/replay.py writes a full forecast.csv only when
 all 56 verified archive runs succeed; never mark partial/fixture replay complete.
+
+## Chat integration
+
+Conversation state belongs to backend/api.py and is bound to forecast ID. Numeric
+chat tools live in backend/services/forecast_tools.py, LLM adapter in adapters/explanation.py.
+Keep the live-only interface and saved forecast restoration. The February UI was
+cancelled by the user; do not add it. Preserve first target as next full UTC hour.
+Conversation tool tests use mocks; do not issue additional paid smoke calls.

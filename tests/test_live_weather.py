@@ -1,6 +1,6 @@
 """Live weather goes through HTTP normalization, real CSV and fitted models; HTTP is mocked."""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -40,6 +40,7 @@ def test_live_api_csv_and_current_server_origin(site, horizon, live_http, provid
     assert response.status_code == 200, response.text
     result = response.json()
     assert result['origin'] == origin and len(result['hours']) == horizon
+    assert result['hours'][0]['valid_at'] == iso(datetime.fromisoformat(origin.replace('Z', '+00:00')) + timedelta(hours=1))
     assert result['weather_provenance']['provenance_status'] == 'live'
     assert result['weather_provenance']['initialized_at'] is None
     assert calls[0][0] == weather.LIVE_URL

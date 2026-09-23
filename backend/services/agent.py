@@ -153,6 +153,26 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
         provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        model_context = {key: copy.deepcopy(metadata[key]) for key in (
+            "turbine_id", "model_id", "estimator", "feature_names", "features", "feature_units",
+            "training_source", "training_rows", "train_cutoff", "train_origin",
+            "train_last_interval_start", "aggregation_policy", "timezone_assumption",
+            "interval_semantics", "target", "target_unit", "profile",
+        ) if metadata.get(key) is not None}
+        if isinstance(metadata.get("weather_context"), dict):
+            model_context["training_weather"] = {key: copy.deepcopy(metadata["weather_context"][key])
+                for key in ("provider", "model", "wind_height_m", "temperature_height_m",
+                            "training_weather_kind", "availability_verified")
+                if key in metadata["weather_context"]}
+        model_context["limitations"] = [
+            "Мощность нормализована в [0,1]; паспортная мощность установки неизвестна, МВт·ч не рассчитаны.",
+            "Совпадение изменений погоды и мощности не доказывает физическую причину изменения.",
+            "Точность на прогнозной погоде этим расчётом не измерена; февральские цели не использованы для обучения.",
+        ]
+        if request["mode"] != "fixture":
+            model_context["limitations"].append(
+                "Ветер на высоте 10 м — признак погодного провайдера; высота датчика турбины неизвестна."
+            )
         identity_provenance = ({key: value for key, value in provenance.items()
                                 if key not in ("retrieved_at", "available_at", "weather_cache_hit")}
                                if request["mode"] == "live" else provenance)
@@ -166,6 +186,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         if cached is not None:
             result["cache_hit"] = True
             result["weather_provenance"] = provenance
+            result["model_context"] = model_context
             result["trace"] = trace + [{"step": "predict_power", "status": "cached", "detail": "same validated content"}]
             return result
         raw_predictions = predict_power_csv(
@@ -206,6 +227,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
                   "fingerprint": identity, "cache_hit": False,
                   "train_last_interval_start": metadata["train_last_interval_start"],
                   "model_input": model_input,
+                  "model_context": model_context,
                   "weather_provenance": provenance, "hours": hours, "analysis": analysis,
                   "trace": trace}
         if request["mode"] != "fixture":

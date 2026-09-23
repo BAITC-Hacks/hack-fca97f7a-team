@@ -55,6 +55,7 @@ export interface ModelProvenance {
 }
 
 export interface ForecastResult extends ForecastRequest {
+  origin: string
   status: 'ok'
   forecast_id: string
   model_input: ModelInput
@@ -91,4 +92,24 @@ export interface Explanation {
   forecast_fingerprint: string
   warning: string | null
   model?: string
+  notes?: string[]
+}
+
+export interface TimeSelection {
+  start: string
+  end: string
+}
+
+export interface ToolResult {
+  tool: string
+  data: Record<string, unknown>
+  text: string
+  selection?: TimeSelection | null
+  table?: { columns: string[], rows: string[][] }
+}
+
+export interface QuestionAnswer extends Explanation {
+  conversation_id: string
+  selection?: TimeSelection | null
+  tool_results?: ToolResult[]
 }

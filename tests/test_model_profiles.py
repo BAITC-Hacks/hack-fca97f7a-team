@@ -1,5 +1,7 @@
 import json
 import shutil
+from hashlib import sha256
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -67,6 +69,45 @@ def test_provider_identity_binds_recipe_source_and_cutoff():
                         profile="open_meteo_ecmwf_ifs_10m", weather_context=bad)
 
 
+@pytest.mark.parametrize("recipe", tuple(FORECAST_RECIPES))
+def test_provider_recipe_and_v1_identity_unchanged_by_measured_variants(recipe):
+    model = provider_model(recipe=recipe)
+    metadata = model.metadata
+    assert metadata["implementation"] == "hourly-hgbr-v1"
+    assert metadata["parameters"] == FORECAST_RECIPES[recipe]
+    assert metadata["params"] == FORECAST_RECIPES[recipe]
+    assert model.estimator.get_params(deep=False) == type(model.estimator)(
+        **FORECAST_RECIPES[recipe]).get_params(deep=False)
+    identity = {
+        "implementation": "hourly-hgbr-v1",
+        "turbine_id": "T2",
+        "cutoff": metadata["train_cutoff"],
+        "canonical_sha256": metadata["canonical_sha256"],
+        "feature_names": metadata["feature_names"],
+        "parameters": FORECAST_RECIPES[recipe],
+        "python_version": metadata["python_version"],
+        "library_versions": metadata["library_versions"],
+        "profile": "open_meteo_ecmwf_ifs_10m",
+        "recipe": recipe,
+        "weather_context": context(),
+    }
+    digest = sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert metadata["model_id"] == f"sha256:{digest}"
+    assert train_model(history(), FIRST_ORIGIN, "T2", profile="open_meteo_ecmwf_ifs_10m",
+                       recipe=recipe, weather_context=context(), variant=None).metadata["model_id"] == metadata["model_id"]
+
+
+def test_cross_profile_variants_rejected():
+    for variant in ("baseline", "candidate"):
+        with pytest.raises(ForecastError) as error:
+            train_model(history(), FIRST_ORIGIN, "T2", profile="open_meteo_ecmwf_ifs_10m",
+                        weather_context=context(), variant=variant)
+        assert error.value.code == "INVALID_INPUT"
+    with pytest.raises(ForecastError) as error:
+        train_model(history(), FIRST_ORIGIN, "T2", recipe="absolute", variant="candidate")
+    assert error.value.code == "INVALID_INPUT"
+
+
 def test_provider_metadata_tampering_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
     path = save_model(provider_model())
@@ -76,6 +117,22 @@ def test_provider_metadata_tampering_rejected(monkeypatch, tmp_path):
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(ForecastError, match="Артефакт"):
         load_model("T2", profile="open_meteo_ecmwf_ifs_10m")
+
+
+def test_provider_estimator_configuration_tampering_rejected_with_updated_checksum(tmp_path):
+    path = save_model(provider_model(), tmp_path)
+    model_path = path / "model.pkl"
+    estimator = pickle.loads(model_path.read_bytes())
+    estimator.set_params(loss="absolute_error")
+    binary = pickle.dumps(estimator, protocol=pickle.HIGHEST_PROTOCOL)
+    model_path.write_bytes(binary)
+    metadata_path = path / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["artifact_sha256"] = sha256(binary).hexdigest()
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(ForecastError) as error:
+        load_model(path, profile="open_meteo_ecmwf_ifs_10m")
+    assert error.value.code == "MODEL_UNAVAILABLE"
 
 
 def test_provider_registry_relative_artifact_root_and_wrong_profile(monkeypatch, tmp_path):

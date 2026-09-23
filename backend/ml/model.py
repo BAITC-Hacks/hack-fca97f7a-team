@@ -20,7 +20,19 @@ from threadpoolctl import threadpool_limits
 from backend.core.contracts import FEATURES, FIRST_ORIGIN, ROOT, SITE_IDS, ForecastError, artifact_dir, utc_time
 
 
-_PARAMETERS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
+MODEL_VARIANTS = ("baseline", "candidate")
+DEFAULT_VARIANT = "candidate"
+_BASELINE_PARAMETERS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
+_PARAMETERS = {
+    "loss": "absolute_error",
+    "max_iter": 300,
+    "learning_rate": 0.04,
+    "max_leaf_nodes": 15,
+    "min_samples_leaf": 40,
+    "l2_regularization": 1.0,
+    "early_stopping": False,
+    "random_state": 42,
+}
 _PROVIDER_PROFILE = "open_meteo_ecmwf_ifs_10m"
 FORECAST_RECIPES = {
     "standard": {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42,
@@ -35,6 +47,11 @@ FORECAST_RECIPES = {
 }
 _SCHEMA = 1
 _IMPLEMENTATION = "hourly-hgbr-v1"
+_CANDIDATE_IMPLEMENTATION = "hourly-hgbr-v2"
+_MEASURED_VARIANTS = {
+    "baseline": (_IMPLEMENTATION, _BASELINE_PARAMETERS),
+    "candidate": (_CANDIDATE_IMPLEMENTATION, _PARAMETERS),
+}
 _UNITS = {"wind_speed_ms": "m/s", "temperature_c": "degC"}
 
 
@@ -82,23 +99,31 @@ def _validated_weather_context(context: dict | None) -> dict:
     return dict(context)
 
 
-def _profile_recipe(profile: str, recipe: str, weather_context: dict | None) -> tuple[dict, dict | None]:
+def _profile_recipe(profile: str, recipe: str, weather_context: dict | None,
+                    variant: str | None) -> tuple[dict, dict | None, str]:
     if profile == "measured":
         if recipe != "standard" or weather_context is not None:
             raise ForecastError("INVALID_INPUT", "Профиль измеренной погоды требует стандартную модель.")
-        return _PARAMETERS.copy(), None
+        selected = DEFAULT_VARIANT if variant is None else variant
+        if not isinstance(selected, str) or selected not in _MEASURED_VARIANTS:
+            raise ForecastError("INVALID_INPUT", "Неизвестный вариант модели измеренной погоды.")
+        implementation, parameters = _MEASURED_VARIANTS[selected]
+        return parameters.copy(), None, implementation
+    if variant is not None:
+        raise ForecastError("INVALID_INPUT", "Вариант модели измеренной погоды недопустим для погодного профиля.")
     if profile != _PROVIDER_PROFILE or recipe not in FORECAST_RECIPES:
         raise ForecastError("INVALID_INPUT", "Неизвестный профиль или рецепт модели.")
-    return FORECAST_RECIPES[recipe].copy(), _validated_weather_context(weather_context)
+    return FORECAST_RECIPES[recipe].copy(), _validated_weather_context(weather_context), _IMPLEMENTATION
 
 
 def train_model(history: pd.DataFrame, origin: str, turbine_id: str, *,
                 profile: str = "measured", recipe: str = "standard",
-                weather_context: dict | None = None) -> ModelBundle:
+                weather_context: dict | None = None,
+                variant: str | None = None) -> ModelBundle:
     """Fit one turbine using only hours completed by both cutoffs."""
     if turbine_id not in SITE_IDS:
         raise ForecastError("INVALID_INPUT", "Неизвестная турбина.")
-    parameters, weather_context = _profile_recipe(profile, recipe, weather_context)
+    parameters, weather_context, implementation = _profile_recipe(profile, recipe, weather_context, variant)
     requested_cutoff = utc_time(origin)
     frozen_cutoff = utc_time(FIRST_ORIGIN)
     if requested_cutoff.minute or requested_cutoff.second or requested_cutoff.microsecond:
@@ -140,7 +165,7 @@ def train_model(history: pd.DataFrame, origin: str, turbine_id: str, *,
     selected[[*FEATURES, "power_norm"]] = numeric
     canonical_sha = _digest(_canonical_rows(selected))
     identity = {
-        "implementation": _IMPLEMENTATION,
+        "implementation": implementation,
         "turbine_id": turbine_id,
         "cutoff": _iso(cutoff),
         "canonical_sha256": canonical_sha,
@@ -188,7 +213,7 @@ def train_model(history: pd.DataFrame, origin: str, turbine_id: str, *,
         "python_version": identity["python_version"],
         "library_versions": identity["library_versions"],
         "validation": None,
-        "implementation": _IMPLEMENTATION,
+        "implementation": implementation,
         "profile": profile,
         "recipe": recipe,
         "weather_context": weather_context,
@@ -310,10 +335,19 @@ def _load_versioned(path: Path) -> ModelBundle:
         if profile == "measured":
             if recipe != "standard" or metadata.get("weather_context") is not None:
                 raise ValueError("measured model profile")
-            expected_parameters = _PARAMETERS
+            known_configuration = next(
+                ((known_implementation, parameters) for known_implementation, parameters
+                 in _MEASURED_VARIANTS.values()
+                 if metadata.get("implementation") == known_implementation
+                 and metadata.get("parameters") == parameters),
+                None,
+            )
+            if known_configuration is None:
+                raise ValueError("measured model implementation or parameters")
+            _, expected_parameters = known_configuration
         elif profile == _PROVIDER_PROFILE:
             expected_parameters = FORECAST_RECIPES.get(recipe)
-            if expected_parameters is None:
+            if expected_parameters is None or metadata.get("implementation") != _IMPLEMENTATION:
                 raise ValueError("provider model recipe")
             context = _validated_weather_context(metadata.get("weather_context"))
             identity.update({"profile": profile, "recipe": recipe,
@@ -334,11 +368,14 @@ def _load_versioned(path: Path) -> ModelBundle:
                 or metadata.get("feature_units") != _UNITS
                 or metadata.get("estimator") != "HistGradientBoostingRegressor"
                 or metadata.get("parameters") != expected_parameters
+                or metadata.get("params", expected_parameters) != expected_parameters
                 or metadata.get("artifact_sha256") != _digest(binary)):
             raise ValueError("artifact identity or checksum")
         estimator = pickle.loads(binary)
         if not isinstance(estimator, HistGradientBoostingRegressor) or not hasattr(estimator, "n_features_in_") or estimator.n_features_in_ != len(FEATURES):
             raise ValueError("estimator incompatible")
+        if estimator.get_params(deep=False) != HistGradientBoostingRegressor(**expected_parameters).get_params(deep=False):
+            raise ValueError("estimator parameters incompatible")
         # The existing agent consumes these stable keys. They are aliases of
         # versioned metadata and do not change the artifact identity.
         metadata["train_origin"] = metadata["train_cutoff"]

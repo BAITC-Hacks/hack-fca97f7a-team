@@ -154,7 +154,7 @@ def test_questions_use_stored_forecast_without_requiring_api_key(monkeypatch):
     created = client.post("/api/forecasts", json=VALID).json()
     seen = []
 
-    def answer(result, question, backend):
+    def answer(result, question, backend, *, history=None, selection=None):
         seen.append((result, question, backend))
         return {"text": "grounded answer", "backend": "template",
                 "forecast_fingerprint": result["fingerprint"], "warning": None}

@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import type { Explanation } from '../types'
+import type { Explanation, QuestionAnswer } from '../types'
+import AssistantText from '../AssistantText'
+import { localTime, ru } from '../ru'
 import Icon from '../ui/Icon'
 
-export interface AssistantMessage { id: number, question: string, text: string, backend: 'local' | 'llm' | 'template', warning?: string | null }
+export interface AssistantMessage { id: number, question: string, text: string, backend: 'local' | 'llm' | 'template', warning?: string | null, richAnswer?: QuestionAnswer }
+
+function AnswerContent({ answer }: { answer: QuestionAnswer }) {
+  return <AssistantText answer={answer}>
+    {answer.selection && <p className="answer-selection"><strong>{ru.selectedPeriod}</strong> {localTime(answer.selection.start, 'Asia/Almaty')} — {localTime(answer.selection.end, 'Asia/Almaty')}</p>}
+    {answer.tool_results?.filter(result => result.table && result.table.columns.length > 0).map((result, index) => <div className="table-scroll chat-table" key={`${result.tool}-${index}`}>
+      <table><caption>{ru.calculationTable}</caption><thead><tr>{result.table!.columns.map((column, i) => <th scope="col" key={i}>{column}</th>)}</tr></thead><tbody>{result.table!.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table>
+    </div>)}
+    {answer.model && <small className="explanation-meta">{answer.model}</small>}
+  </AssistantText>
+}
 export type AgentPhase = 'idle' | 'restoring' | 'refreshing' | 'forecast' | 'analyzing' | 'answering' | 'ready' | 'warning'
 const phaseLabels: Record<AgentPhase, string> = { idle: 'Готов исследовать', restoring: 'Открываем сохранённый прогноз', refreshing: 'Обновляем погоду', forecast: 'Запрос погоды и прогноз ML', analyzing: 'Готовим объяснение', answering: 'Ответ по прогнозу', ready: 'Прогноз готов', warning: 'Нужно внимание' }
 
@@ -59,11 +71,11 @@ export default function Assistant({ open, onOpenChange, phase, context, explanat
         <div className="assistant-context"><span className="status-dot" />{context}</div>
         <div className="assistant-conversation" ref={scroll} role="log" aria-live="polite" aria-relevant="additions text">
           <div className="assistant-intro"><span className="eyebrow">Ветер становится понятнее</span><p>{hasForecast ? 'Выберите момент. Я помогу увидеть, что меняется.' : 'От Земли до одного часа прогноза. Выберите турбину или попросите меня показать её.'}</p></div>
-          {explanation && <details className="assistant-summary"><summary>Объяснение прогноза <Icon name="chevron" size={14} /></summary><p>{explanation.text}</p><small>{explanation.backend === 'llm' ? `Объяснение ИИ${explanation.model ? ` · ${explanation.model}` : ''}` : 'Расчётное объяснение — ИИ недоступен'}</small>{explanation.warning && <p className="assistant-warning">{explanation.warning}</p>}</details>}
+          {explanation && <details className="assistant-summary"><summary>Объяснение прогноза <Icon name="chevron" size={14} /></summary><AssistantText answer={explanation} />{explanation.model && <small className="explanation-meta">{explanation.model}</small>}</details>}
           {!explanation && summaryDeferred && <p className="assistant-warning">Открыт сохранённый прогноз. Объяснение загружается только по вашему запросу.</p>}
           {onLoadExplanation && <button className="secondary-button assistant-load-summary" onClick={onLoadExplanation}>{explanationError ? 'Повторить объяснение' : 'Получить объяснение'}<Icon name="arrow" size={15} /></button>}
           {explanationError && <p className="assistant-warning">{explanationError} Числовой прогноз сохранён.</p>}
-          {messages.map(message => <div className="assistant-exchange" key={message.id}><p className="assistant-question">{message.question}</p><div className="assistant-answer"><span>{message.backend === 'local' ? 'Локальное действие · данные прогноза' : message.backend === 'llm' ? 'Объяснение ИИ' : 'Расчётный ответ — ИИ недоступен'}</span><p>{message.text}</p>{message.warning && <small>{message.warning}</small>}</div></div>)}
+          {messages.map(message => <div className="assistant-exchange" key={message.id}><p className="assistant-question">{message.question}</p><div className="assistant-answer">{message.richAnswer ? <AnswerContent answer={message.richAnswer} /> : <><span>{message.backend === 'local' ? 'Локальное действие · данные прогноза' : message.backend === 'llm' ? 'Объяснение ИИ' : 'Расчётный ответ — ИИ недоступен'}</span><p>{message.text}</p>{message.warning && <small>{message.warning}</small>}</>}</div></div>)}
           {pending && <div className="assistant-exchange"><p className="assistant-question">{pending}</p><p className="assistant-pending" role="status"><span />{phaseLabels[phase]}</p></div>}
           {error && <div className="error-banner" role="alert">{error}</div>}
         </div>

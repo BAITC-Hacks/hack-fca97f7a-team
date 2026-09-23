@@ -21,7 +21,7 @@ type View = 'earth' | 'turbine'
 type Quality = 'auto' | 'high' | 'medium' | 'low'
 type ForecastOptions = { siteId: string, horizon: 24 | 48 }
 const savedForecastKey = 'wind-demo:last-live-forecast-id'
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : ru.requestFailed
+const errorMessage = (error: unknown) => error instanceof TypeError ? 'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.' : error instanceof Error ? error.message : ru.requestFailed
 
 function savedForecastId(): string | null {
   try { const id = localStorage.getItem(savedForecastKey); return id && /^[0-9a-f]{64}$/.test(id) ? id : null }
@@ -75,6 +75,8 @@ export default function App() {
   const actionEpoch = useRef(0)
   const forecastController = useRef<AbortController | null>(null)
   const answerController = useRef<AbortController | null>(null)
+  const conversationId = useRef<string | null>(null)
+  const askingNow = useRef(false)
   const lastSuccess = useRef<ForecastResult | null>(null)
   const messageId = useRef(0)
   const introPlayed = useRef(false)
@@ -90,6 +92,8 @@ export default function App() {
     requestEpoch.current += 1
     forecastController.current?.abort()
     answerController.current?.abort()
+    conversationId.current = null
+    askingNow.current = false
     setResult(null); setPrevious(null); setExplanation(null); setMessages([]); setPendingQuestion(''); setQuestionDraft('')
     setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setRefreshing(false); setRestoring(false); setRestored(false); setAsking(false); setExplaining(false)
     setPlaying(false); setPlayEndIndex(null); setIndex(0); setActionNotice('')
@@ -97,6 +101,7 @@ export default function App() {
   function cancelAction() {
     actionEpoch.current += 1
     answerController.current?.abort()
+    askingNow.current = false
     setPendingQuestion(''); setAsking(false); setPlaying(false); setPlayEndIndex(null); setActionNotice('')
   }
   function updateInputs(change: () => void) { cancelAction(); invalidate(); change() }
@@ -202,7 +207,7 @@ export default function App() {
       void loadExplanation(forecast, controller, epoch)
       return forecast
     } catch (err) {
-      if (epoch === requestEpoch.current && !controller.signal.aborted) { setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
+      if (epoch === requestEpoch.current && !controller.signal.aborted) { lastSuccess.current = null; setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
       return null
     }
   }
@@ -218,6 +223,7 @@ export default function App() {
   function localReply(question: string, text: string) { setMessages(current => [...current, { id: ++messageId.current, question, text, backend: 'local' }]); setPendingQuestion(''); setAsking(false) }
 
   async function commandAssistant(question: string) {
+    if (askingNow.current) return
     const command = parseUICommand(question)
     cancelAction()
     const token = actionEpoch.current
@@ -269,16 +275,23 @@ export default function App() {
     answerController.current = controller
     const epoch = requestEpoch.current
     const currentHour = active.hours[active === result ? index : 0]
+    askingNow.current = true
     setPendingQuestion(question); setAsking(true)
     try {
       const contextualQuestion = `${question}\nКонтекст интерфейса: турбина ${active.turbine_id}; выбранный час ${currentHour.valid_at}; часовой пояс ${active.timezone}. Используй только сохранённый прогноз; не считай показания измерениями.`
-      const answer = await askQuestion(active.forecast_id, contextualQuestion, controller.signal)
+      const answer = await askQuestion(active.forecast_id, contextualQuestion, conversationId.current ?? undefined, controller.signal)
       if (epoch !== requestEpoch.current || token !== actionEpoch.current || controller.signal.aborted) return
       if (answer.forecast_fingerprint !== active.fingerprint) throw new Error(ru.staleAnswer)
-      setMessages(current => [...current, { id: ++messageId.current, question, text: answer.text, backend: answer.backend, warning: answer.warning }]); setPendingQuestion('')
+      if (!answer.conversation_id || (conversationId.current && answer.conversation_id !== conversationId.current)) throw new Error(ru.invalidServerResponse)
+      conversationId.current = answer.conversation_id
+      setMessages(current => [...current, { id: ++messageId.current, question, text: answer.text, backend: answer.backend, warning: answer.warning, richAnswer: answer }]); setPendingQuestion('')
     } catch (err) {
-      if (epoch === requestEpoch.current && token === actionEpoch.current && !controller.signal.aborted) { setQuestionError(errorMessage(err)); setPendingQuestion(''); setQuestionDraft(question) }
-    } finally { if (epoch === requestEpoch.current && token === actionEpoch.current && !controller.signal.aborted) setAsking(false) }
+      if (epoch === requestEpoch.current && token === actionEpoch.current && !controller.signal.aborted) {
+        if (err instanceof ApiFailure && err.code === 'CONVERSATION_NOT_FOUND') { conversationId.current = null; setMessages([]); setQuestionError(ru.newConversation) }
+        else setQuestionError(errorMessage(err))
+        setPendingQuestion(''); setQuestionDraft(question)
+      }
+    } finally { if (epoch === requestEpoch.current && token === actionEpoch.current && !controller.signal.aborted) { askingNow.current = false; setAsking(false) } }
   }
 
   async function saveCsv(kind: 'forecast' | 'model-input') {

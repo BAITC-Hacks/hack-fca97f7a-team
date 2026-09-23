@@ -183,7 +183,8 @@ contract tests together. Do not silently rename columns or change units.
 ## Model seam — B owns `backend/ml/model.py` and `backend/ml/data.py`
 
 ```python
-train_model(history, origin, turbine_id) -> PowerModel
+train_model(history, origin, turbine_id, *, profile="measured", recipe="standard",
+            weather_context=None, variant=None) -> PowerModel
 load_model(turbine_id, *, profile="measured") -> PowerModel
 predict_power_csv(model, csv_path, *, turbine_id, origin,
                   horizon_hours, expected_sha256) -> list[float]
@@ -203,6 +204,17 @@ to [0,1] and reports how many values needed clamping.
 
 To replace the regressor, change fit/load/predict inside this module and retrain
 via `python -m scripts.train --mode fixture`. Preserve output alignment and metadata.
+For the `measured` profile, omitted `variant` selects `candidate`
+(`hourly-hgbr-v2`: absolute error, 300 iterations, no automatic early stopping).
+`variant="baseline"` retains the original `hourly-hgbr-v1` recipe and identity.
+Provider profiles retain their existing recipes and identities; they reject an
+explicit measured variant. Versioned loading checks known implementation/parameter
+pairs and the estimator parameters. The measured training CLI accepts
+`--variant candidate|baseline`; provider training remains `scripts.train_forecast`.
+`python -m scripts.compare_models` compares October–January measured-weather
+diagnostics without changing any active registry. Provider evaluation explicitly
+uses measured `baseline` as its legacy control. CSV/API contracts are unchanged.
+See [MODEL_IMPROVEMENT.md](MODEL_IMPROVEMENT.md).
 `predict_power(model, rows)` is the lower-level helper; orchestration must call the
 CSV interface. Models are fitted once from separately identified turbine datasets,
 not during HTTP requests or React renders.
@@ -224,7 +236,7 @@ LLM prose must not overwrite predictions, uncertainty, or provenance.
 
 ```python
 summarize_forecast(result, backend="template") -> dict
-answer_question(result, question, backend="llm") -> dict
+answer_question(result, question, backend="llm", *, history=None, selection=None) -> dict
 ```
 
 FastAPI supplies a server-stored successful result, never client-authored power
@@ -353,3 +365,29 @@ It does not auto-call explanation on restore. Missing/expired IDs return404 and
 are cleared; explicit refresh regenerates real weather and prediction.
 
 Model registries now write paths relative to latest.json (T1/hash). The loader retains legacy absolute/repository-relative compatibility and requires the resolved turbine directory. scripts/package_replay.py verifies and exports a portable February bundle without secrets or training CSVs.
+
+## Conversation tools and context
+
+`POST /api/forecasts/{id}/questions` additionally accepts optional
+`conversation_id` (32 lowercase hex characters). Omit it to start a new dialogue.
+The response returns that ID, optional `selection={start,end}` (UTC half-open)
+and `tool_results` with computed data and optional tables, plus `notes`.
+History and selection live on the server: 128 conversations, ten messages each.
+An ID cannot be reused for another forecast. Expired/mismatched IDs return
+404/CONVERSATION_NOT_FOUND; concurrent questions return409/CONVERSATION_BUSY.
+React clears an expired dialogue ID and offers a retry, and resets conversation
+on forecast changes. Reload restores the forecast, not a historical dialogue.
+
+`backend/services/forecast_tools.py` supplies best/worst hours, continuous windows,
+period weather, average power, adjacent-period comparisons and power changes.
+These are pure Python calculations over the stored forecast. OpenAI can call
+at most four tools across three responses; local fallback supports common Russian
+questions. Numerical claims are screened against returned facts (including
+rounding and normalized-power percentages); this is not a proof of semantic
+correctness of arbitrary prose. Unsupported MW/MWh cannot be inferred.
+No LLM output changes the numeric forecast. Notes and safe Markdown are rendered
+separately; tables come from server calculations. Model context is an allowlisted
+projection of metadata and contains no raw training CSV or keys.
+
+Live timing remains main's contract: server origin is the current UTC hour,
+first target is the next full hour. The PR's double hour increment was removed.
