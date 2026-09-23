@@ -152,7 +152,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256", "grid_resolution_degrees", "native_step_hours", "evidence", "source_kind") if key in manifest})
         model_context = {key: copy.deepcopy(metadata[key]) for key in (
             "turbine_id", "model_id", "estimator", "feature_names", "features", "feature_units",
             "training_source", "training_rows", "train_cutoff", "train_origin",
@@ -173,6 +173,8 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
             model_context["limitations"].append(
                 "Ветер на высоте 10 м — признак погодного провайдера; высота датчика турбины неизвестна."
             )
+        if manifest.get("availability_basis") == "operational_object_last_modified":
+            model_context["limitations"].append("Погода ECMWF из сетки 0,25° интерполирована по времени. Обучение использовало обработку Open-Meteo: отличие обработки признаков может влиять на точность.")
         identity_provenance = ({key: value for key, value in provenance.items()
                                 if key not in ("retrieved_at", "available_at", "weather_cache_hit")}
                                if request["mode"] == "live" else provenance)
@@ -208,6 +210,8 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
             warnings.append("Историческая доступность выпуска предполагается по правилу задержки 24 ч; точное время публикации и as-issued происхождение не подтверждены для каждого выпуска.")
         if request["mode"] == "live":
             warnings.append("Текущий прогноз погоды; модель обучена до февраля 2026 года")
+        if manifest.get("availability_basis") == "operational_object_last_modified":
+            warnings.append("Операционный архив ECMWF: сетка 0,25°, часовые значения интерполированы; обработка отличается от погодных признаков обучения.")
         warnings.append("Временная зона и начало интервала исходных данных требуют подтверждения")
         distribution = metadata.get("feature_distribution", {})
         outside = sum(any(name in distribution and

@@ -391,3 +391,39 @@ projection of metadata and contains no raw training CSV or keys.
 
 Live timing remains main's contract: server origin is the current UTC hour,
 first target is the next full hour. The PR's double hour increment was removed.
+
+## February UI and operational replay
+
+The primary React scenario is February 2026; live remains separately selectable.
+This supersedes previous live-only UI restrictions. `forecast_date` is the local
+**target day**, not the issue date: February 1 maps to January 31 at 23:00
+Asia/Almaty (`18:00Z`). Twenty-eight origins cover all 672 February hours per
+turbine; the last 48-hour forecast also contains March 1 and is labelled so.
+
+- `POST /api/replay/forecasts`: strict body `{turbine_id, forecast_date,
+  horizon_hours:24|48, weather_source:"verified"|"provider-documented"}`.
+  Verified is the default. Success is the existing forecast DTO plus
+  `forecast_date`, `weather_source` and the normal stored `forecast_id`.
+- `GET /api/replay/february`: supported dates, chronology, source descriptions,
+  expected row counts and explicit absence of February measured power.
+- `GET /api/replay/february/download?kind=forecast|daily|report`: complete-month
+  outputs from `deliverables/february_2026_operational`; missing artifacts return
+  404 rather than substituting the older conditional archive results.
+
+`backend/services/february.py` owns local-date-to-origin conversion. All results
+still pass through the canonical input CSV, frozen model, result store and the
+same explanation/conversation endpoints. Changing source/date/turbine/horizon
+invalidates the frontend result and conversation. Reopening a stored result does
+not fetch weather or call an LLM.
+
+The verified UI source uses the ECMWF operational archive adapter. It must check
+all source objects' historical availability against origin and verify cached
+content before inference. S3 Last-Modified is the time of the archived object,
+not a claim of the exact original ECMWF publication time. Native grid and hourly
+interpolation must be recorded; they differ from Open-Meteo preprocessing used
+in training. Verification of weather chronology does not establish power skill.
+
+The older Open-Meteo Single Runs source remains an explicit conditional option:
+`available_at=null`, `provenance_status=provider_documented`. It cannot silently
+replace missing operational data. The operator-attested Open-Meteo adapter and
+its strict manifest gate remain unchanged for existing archive callers.

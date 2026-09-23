@@ -73,6 +73,11 @@ const fields: Record<string, string> = {
   initialized_at: 'Время выпуска', available_at: 'Время доступности', availability_basis: 'Основание доступности',
   retrieved_at: 'Время получения', provenance_status: 'Статус происхождения', raw_sha256: 'Контрольная сумма источника', interpolation: 'Интерполяция',
   coordinate_status: 'Статус координат',
+  assumed_available_by: 'Предполагаемая доступность', availability_verified: 'Доступность подтверждена',
+  run_policy: 'Правило выбора выпуска', documentation_url: 'Документация поставщика',
+  forecast_date: 'Первый день прогноза',
+  grid_resolution: 'Разрешение погодной сетки', grid_resolution_degrees: 'Разрешение сетки, градусы',
+  source_step_hours: 'Исходный шаг прогноза, часы', publication_evidence: 'Подтверждение публикации',
   weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
   temperature_height_m: 'Высота температуры, м', wind_height_status: 'Смысл высоты ветра',
   grid_latitude: 'Широта погодной сетки', grid_longitude: 'Долгота погодной сетки',
@@ -86,6 +91,13 @@ export const stepLabel = (step: string) => ({
   load_model: 'Загрузка модели', predict_power: 'Расчёт мощности', analyze_result: 'Анализ результата', error: 'Ошибка',
 }[step] || step.replaceAll('_', ' '))
 export const provenanceLabel = (value: string) => ({
+  linear: 'Линейная интерполяция', linear_3h_to_hourly: 'Линейная интерполяция с 3-часового на почасовой шаг',
+  s3_last_modified: 'Время публикации копии в публичном архиве',
+  provider_documented: 'Архив · доступность по допущению',
+  provider_documented_conservative_24h: 'Документация поставщика; запас 24 часа',
+  previous_day_00z_for_18z_origin: 'Выпуск 00:00 UTC предыдущего дня для расчёта в 18:00 UTC',
+  external_capture_log: 'Внешний журнал публикации', reviewed_as_issued: 'Проверенный исторический выпуск',
+  true: 'Да', false: 'Нет',
   live: ru.live, fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
@@ -97,7 +109,7 @@ export const weatherProviderLabel = (value?: string) => value?.startsWith('Open-
   : value?.startsWith('Open-Meteo Single Runs') ? 'Open-Meteo · ECMWF IFS (архив)' : value || ru.weatherProviderUnknown
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')
 export function provenanceValue(key: string, value: string, zone: string): string {
-  if (key.endsWith('_at') && !Number.isNaN(Date.parse(value))) return localTime(value, zone)
+  if ((key.endsWith('_at') || key === 'assumed_available_by') && !Number.isNaN(Date.parse(value))) return localTime(value, zone)
   return provenanceLabel(value)
 }
 export function warningLabel(warning: string): string {
@@ -119,6 +131,8 @@ export function traceDetail(step: string, detail: string): string {
 }
 
 export const apiErrors: Record<string, string> = {
+  ARCHIVE_UNAVAILABLE: 'Операционный архив ECMWF отсутствует или не прошёл проверку исторической публикации. Подготовьте архив на сервере и повторите расчёт.',
+  REPLAY_UNAVAILABLE: 'Февральский архив отсутствует или не прошёл проверку. Проверьте комплект погоды на сервере.',
   NOT_FOUND: 'Прогноз больше не доступен. Сформируйте его заново.',
   CONVERSATION_NOT_FOUND: ru.newConversation,
   CONVERSATION_BUSY: 'Дождитесь ответа на предыдущий вопрос и повторите запрос.',

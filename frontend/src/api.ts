@@ -1,4 +1,4 @@
-import type { ApiError, Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site } from './types'
+import type { ApiError, Explanation, ForecastRequest, ReplayForecastRequest, ForecastResult, QuestionAnswer, Site } from './types'
 import { apiErrors, ru } from './ru'
 
 export class ApiFailure extends Error {
@@ -42,6 +42,10 @@ export function getSites(signal?: AbortSignal): Promise<Site[]> {
 
 export function createForecast(input: ForecastRequest, signal?: AbortSignal): Promise<ForecastResult> {
   return request<ForecastResult>('/forecasts', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input), signal })
+}
+
+export function createReplayForecast(input: ReplayForecastRequest, signal?: AbortSignal): Promise<ForecastResult> {
+  return request<ForecastResult>('/replay/forecasts', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input), signal })
 }
 
 export function getForecast(id: string, signal?: AbortSignal): Promise<ForecastResult> {

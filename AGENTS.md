@@ -1,8 +1,9 @@
-> Current scope: finish missing jury requirements while keeping the UI live-only.
-> February CLI may explicitly use provider-documented Single Runs with inferred
-> availability, clearly labelled and never promoted to verified as-issued evidence.
-> Keep the default strict archive gate; internal conditional replay requires an
-> explicit opt-in and available_at=null. See docs/february-replay.md.
+> Current scope: make February 2026 historical replay the primary React demo.
+> The latest user explicitly requires February dates and historical weather in UI;
+> earlier live-only restrictions are superseded. Keep live as a separate option.
+> Provider-documented Single Runs require explicit opt-in, inferred availability
+> shown in UI, and available_at=null. Never promote them to verified as-issued
+> evidence; preserve the default strict archive gate. See docs/february-replay.md.
 
 # Working agreement
 
@@ -24,9 +25,14 @@ the three developers, with ownership, priorities and acceptance criteria.
 
 ## Required flow and boundaries
 
-1. React selects a registered turbine and submits an explicit forecast origin.
+1. React selects a registered turbine, February forecast date and 24/48-hour horizon.
+   Historical dates map server-side to the preceding local day at 23:00 (18:00 UTC).
+   Conditional replay explicitly selects weather_source=provider-documented.
+   Live remains a separate mode with the current UTC hour as origin.
 2. `backend/api.py` validates HTTP bodies and calls `agent.run_forecast`.
-3. `backend/adapters/weather.py` normalizes provider output into hourly wind m/s and temperature °C.
+3. Weather adapters normalize output into hourly wind m/s and temperature °C.
+   Historical replay reads checked Single Runs from `replay_weather.py`; live and
+   strict verified archive use `backend/adapters/weather.py`.
 4. `backend/ml/model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
 5. `model.predict_power_csv` reads and validates that exact file before inference.
 6. The agent returns numeric predictions, statistics, provenance and actual trace.
@@ -53,7 +59,7 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
   UTC-aware and hourly; never use today's date implicitly for historical replay.
 - Weather initialization ≤ availability ≤ origin; verify every forecast hour,
   turbine identity and finite units before inference or cache reuse.
-- Default archive mode requires verified as-issued forecasts. The explicit internal
+- Default archive mode requires verified as-issued forecasts. The explicit
   provider-documented replay uses a separate conditional provenance status and never
   claims verified publication times. Never replace forecasts silently
   with fixtures, reanalysis, actual weather or retrospectively generated hindcasts.
@@ -66,7 +72,8 @@ the retrospective training protocol and its unverified 24/48-hour skill. Coordin
 and mapped by the user through Google Maps; retain `coordinate_status=user_provided`
 and the source links (see CONTRACTS.md). OpenAI is a real adapter; missing
 keys/failure must be labeled fallback.
-Do not claim full organizer compliance until archive weather and replay work.
+Do not claim full organizer compliance from coverage alone: historical archive
+availability remains conditional until its provenance is substantiated.
 
 ## Ownership and how to make changes
 
@@ -133,7 +140,7 @@ ones and list remaining stubs accurately.
 
 ## Live weather mode
 
-User explicitly requested actual current weather. React defaults to `live`;
+Live remains available separately from the primary February replay;
 server chooses the current UTC hour and fetches fixed ECMWF IFS from Open-Meteo Forecast without
 archive evidence. Preserve separate fixture/archive semantics. Live provenance
 records retrieval time, not an invented initialization/publication time.
@@ -159,6 +166,8 @@ all 56 verified archive runs succeed; never mark partial/fixture replay complete
 
 Conversation state belongs to backend/api.py and is bound to forecast ID. Numeric
 chat tools live in backend/services/forecast_tools.py, LLM adapter in adapters/explanation.py.
-Keep the live-only interface and saved forecast restoration. The February UI was
-cancelled by the user; do not add it. Preserve first target as next full UTC hour.
+Support both February and live forecasts, preserving saved forecast restoration.
+A change of date, mode, turbine or horizon clears stale results and conversation.
+Historical first target is local midnight of the selected February day; live first
+target is the next full UTC hour. Never refresh historical weather with live data.
 Conversation tool tests use mocks; do not issue additional paid smoke calls.

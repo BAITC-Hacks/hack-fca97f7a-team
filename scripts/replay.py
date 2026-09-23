@@ -32,10 +32,10 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
-               forecast=run_forecast, weather_source: str = "verified") -> dict:
+               forecast=run_forecast, weather_source: str = "operational") -> dict:
     if mode not in ("archive", "fixture") or not 1 <= days <= 28:
         raise ValueError("Replay requires archive/fixture and 1–28 daily origins")
-    if weather_source not in ("verified", "provider-documented"):
+    if weather_source not in ("operational", "verified", "provider-documented"):
         raise ValueError("Unknown replay weather source")
     documented = weather_source == "provider-documented"
     if documented and mode != "archive":
@@ -44,6 +44,10 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
         from backend.adapters.replay_weather import fetch_replay_weather
         def forecast(request):
             return run_forecast(request, weather_tool=fetch_replay_weather, allow_documented_archive=True)
+    if weather_source == "operational" and mode == "archive" and forecast is run_forecast:
+        from backend.adapters.operational_weather import fetch_operational_weather
+        def forecast(request):
+            return run_forecast(request, weather_tool=fetch_operational_weather)
     output_dir = Path(output_dir)
     rows, runs, failures = [], [], []
     for day in range(days):
@@ -79,7 +83,8 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
                     raise ValueError("Replay output must contain exactly 48 rows per run")
                 rows.extend(exported)
                 runs.append({**request, "fingerprint": result["fingerprint"], "model_id": result["model_id"],
-                             "model_input": result["model_input"], "weather_provenance": provenance})
+                             "model_input": result["model_input"], "weather_provenance": provenance,
+                             "train_last_interval_start": result["train_last_interval_start"]})
             except Exception:
                 # Internal paths/provider responses do not belong in the handoff report.
                 failures.append({**request, "code": "REPLAY_INVALID", "message": "Расчёт не прошёл проверку replay"})
@@ -113,6 +118,9 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
     _atomic_write(output_dir / daily_filename, daily_stream.getvalue())
     report = {"status": "ok" if complete else "incomplete", "mode": mode,
               "full_february_replay": submission_ready, "truth_scored": False,
+              "test_period": {"start_local": "2026-02-01T00:00:00+05:00", "end_exclusive_local": "2026-03-01T00:00:00+05:00", "timezone": "Asia/Almaty"},
+              "training_cutoff": FIRST_ORIGIN,
+              "issue_policy": "previous_local_day_23:00; targets origin+1h..48h",
               "complete_forecast_coverage": complete and days == 28,
               "weather_source": weather_source if mode == "archive" else "fixture",
               "historical_availability_verified": submission_ready,
@@ -134,7 +142,7 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("archive", "fixture"), default="archive")
-    parser.add_argument("--weather-source", choices=("verified", "provider-documented"), default="verified",
+    parser.add_argument("--weather-source", choices=("operational", "verified", "provider-documented"), default="operational",
                         help="Explicitly opt in to documented archive with unverified publication-time assumptions")
     parser.add_argument("--days", type=int, default=28, help="Use 2 for a fixture rehearsal; full replay requires 28")
     parser.add_argument("--output-dir", type=Path, default=artifact_dir() / "replay")

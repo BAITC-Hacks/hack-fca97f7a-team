@@ -20,7 +20,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 from backend.services.agent import run_forecast
-from backend.core.contracts import ROOT, artifact_dir, forecast_csv
+from backend.services.february import february_metadata, run_february_forecast
+from backend.core.contracts import ROOT, ForecastError, artifact_dir, forecast_csv
 from backend.adapters.explanation import answer_question, summarize_forecast
 from backend.adapters.forecast_store import load as load_forecast, save as save_forecast
 from backend.adapters.weather import clear_live_weather_cache, load_sites
@@ -69,6 +70,15 @@ class ForecastBody(BaseModel):
     mode: Literal["fixture", "archive", "live"]
 
 
+class FebruaryForecastBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    turbine_id: Literal["T1", "T2"]
+    forecast_date: StrictStr
+    horizon_hours: Literal[24, 48]
+    weather_source: Literal["verified", "provider-documented"] = "verified"
+
+
 class ExplanationBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -105,7 +115,7 @@ def _status_for(code: str) -> int:
         return 400
     if code in ("DATA_INVALID", "MODEL_INVALID"):
         return 422
-    if code in ("MODEL_UNAVAILABLE", "WEATHER_UNAVAILABLE"):
+    if code in ("MODEL_UNAVAILABLE", "WEATHER_UNAVAILABLE", "ARCHIVE_UNAVAILABLE", "REPLAY_UNAVAILABLE"):
         return 503
     return 500
 
@@ -156,7 +166,10 @@ def _public_result(result: dict) -> dict:
 
 @app.post("/api/forecasts")
 def create_forecast(body: ForecastBody):
-    result = run_forecast(body.model_dump())
+    return _store_forecast_result(run_forecast(body.model_dump()))
+
+
+def _store_forecast_result(result: dict):
     if result.get("status") != "ok":
         code = str(result.get("code", "INTERNAL_ERROR"))
         status = _status_for(code)
@@ -182,6 +195,37 @@ def create_forecast(body: ForecastBody):
         while len(_FORECASTS) > _MAX_FORECASTS:
             _FORECASTS.popitem(last=False)
     return {**copy.deepcopy(stored), "forecast_id": forecast_id}
+
+
+@app.get("/api/replay/february")
+def get_february_replay() -> dict:
+    """Describe the daily decision points and both archive evidence levels."""
+    return february_metadata()
+
+
+@app.post("/api/replay/forecasts")
+def create_february_forecast(body: FebruaryForecastBody):
+    """Replay a selected February date, then reuse the normal forecast store/chat."""
+    try:
+        result = run_february_forecast(**body.model_dump())
+    except ForecastError as exc:
+        return _error(_status_for(exc.code), exc.code, str(exc))
+    if result.get("status") != "ok" and result.get("code") == "WEATHER_UNAVAILABLE":
+        result = {**result, "code": "ARCHIVE_UNAVAILABLE" if body.weather_source == "verified"
+                  else "REPLAY_UNAVAILABLE"}
+    return _store_forecast_result(result)
+
+
+@app.get("/api/replay/february/download")
+def download_february_replay(kind: Literal["forecast", "daily", "report"] = Query(default="daily")):
+    """Serve fixed, reviewable February outputs; the URL never selects a path."""
+    names = {"forecast": "forecast.csv",
+             "daily": "daily_forecast.csv", "report": "report.json"}
+    path = ROOT / "deliverables" / "february_2026_operational" / names[kind]
+    if not path.is_file() or path.is_symlink():
+        return _error(404, "NOT_FOUND", "Февральский отчёт недоступен в этой установке.")
+    return FileResponse(path, media_type="application/json" if kind == "report" else "text/csv",
+                        filename=f"february-2026-{names[kind]}")
 
 
 def _get_forecast(forecast_id: str) -> dict:

@@ -16,6 +16,13 @@ export interface ForecastRequest {
   mode: WeatherMode
 }
 
+export interface ReplayForecastRequest {
+  turbine_id: string
+  forecast_date: string
+  horizon_hours: 24 | 48
+  weather_source: 'verified' | 'provider-documented'
+}
+
 export interface ForecastHour {
   valid_at: string
   lead_hour: number

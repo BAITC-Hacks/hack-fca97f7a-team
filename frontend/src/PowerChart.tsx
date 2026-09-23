@@ -43,7 +43,7 @@ function ChartGraphic({ result, width, svgRef, exported = false }: { result: For
     <text x={left + 25} y={height - 26} fill="#475a51" fontSize={compact ? 10 : 12}>Мощность</text>
     <line x1={left + 103} x2={left + 121} y1={height - 30} y2={height - 30} stroke="#2563a6" strokeWidth={2.5} strokeDasharray="7 4" />
     <text x={left + 128} y={height - 26} fill="#2563a6" fontSize={compact ? 10 : 12}>Ветер</text>
-    <text x={compact ? left : width - right} y={compact ? height - 7 : height - 26} fill="#687772" fontSize={compact ? 9 : 12} textAnchor={compact ? 'start' : 'end'}>{ru.live}</text>
+    <text x={compact ? left : width - right} y={compact ? height - 7 : height - 26} fill="#687772" fontSize={compact ? 9 : 12} textAnchor={compact ? 'start' : 'end'}>{result.mode === 'archive' ? (result.weather_provenance.provenance_status === 'verified' ? 'Архивный прогноз · доступность подтверждена' : 'Архивный прогноз · доступность условная') : ru.live}</text>
   </svg>
 }
 

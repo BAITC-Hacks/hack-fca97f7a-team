@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ApiFailure, askQuestion, createForecast, downloadCsv, explainForecast, getForecast, getSites, refreshWeather } from './api'
+import { ApiFailure, askQuestion, createForecast, createReplayForecast, downloadCsv, explainForecast, getForecast, getSites, refreshWeather } from './api'
 import type { Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site } from './types'
 import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail, weatherProviderLabel } from './ru'
 import PowerChart from './PowerChart'
@@ -13,11 +13,20 @@ function errorMessage(error: unknown): string {
   return ru.requestFailed
 }
 
-const savedForecastKey = 'wind-demo:last-live-forecast-id'
+const savedForecastKey = 'wind-demo:last-forecast-id'
+
+function shiftDate(value: string, days: number): string {
+  return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
+}
+
+function forecastDate(result: ForecastResult): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: result.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(result.hours[0].valid_at))
+  return ['year', 'month', 'day'].map(key => parts.find(part => part.type === key)!.value).join('-')
+}
 
 function savedForecastId(): string | null {
   try {
-    const id = localStorage.getItem(savedForecastKey)
+    const id = localStorage.getItem(savedForecastKey) || localStorage.getItem('wind-demo:last-live-forecast-id')
     return id && /^[0-9a-f]{64}$/.test(id) ? id : null
   } catch { return null }
 }
@@ -25,7 +34,7 @@ function savedForecastId(): string | null {
 function rememberForecast(id: string | null) {
   try {
     if (id) localStorage.setItem(savedForecastKey, id)
-    else localStorage.removeItem(savedForecastKey)
+    else { localStorage.removeItem(savedForecastKey); localStorage.removeItem('wind-demo:last-live-forecast-id') }
   } catch { /* Browser storage can be disabled; current results still work. */ }
 }
 
@@ -54,6 +63,9 @@ function AnswerContent({ answer }: { answer: QuestionAnswer }) {
 }
 
 export default function App() {
+  const [mode, setMode] = useState<'replay' | 'live'>('replay')
+  const [weatherSource, setWeatherSource] = useState<'verified' | 'provider-documented'>('verified')
+  const [date, setDate] = useState('2026-02-01')
   const [sites, setSites] = useState<Site[]>([])
   const [siteId, setSiteId] = useState('')
   const [horizon, setHorizon] = useState<24 | 48>(48)
@@ -108,12 +120,17 @@ export default function App() {
       try {
         const forecast = await getForecast(id, controller.signal)
         if (controller.signal.aborted || epoch !== requestEpoch.current) return
-        if (forecast.status !== 'ok' || forecast.forecast_id !== id || forecast.mode !== 'live' || !loaded.some(site => site.turbine_id === forecast.turbine_id) || !forecast.hours?.length || !forecast.model_input) {
+        if (forecast.status !== 'ok' || forecast.forecast_id !== id || !['live', 'archive'].includes(forecast.mode) || !loaded.some(site => site.turbine_id === forecast.turbine_id) || !forecast.hours?.length || !forecast.model_input) {
           rememberForecast(null)
           throw new Error(ru.savedForecastUnavailable)
         }
         setSiteId(forecast.turbine_id)
         setHorizon(forecast.horizon_hours)
+        setMode(forecast.mode === 'archive' ? 'replay' : 'live')
+        if (forecast.mode === 'archive') {
+          setDate(forecastDate(forecast))
+          setWeatherSource(forecast.weather_provenance.provenance_status === 'verified' ? 'verified' : 'provider-documented')
+        }
         lastSuccess.current = forecast
         setResult(forecast)
         setRestored(true)
@@ -153,22 +170,24 @@ export default function App() {
     setRefreshing(refresh)
     const input: ForecastRequest = { turbine_id: next.siteId, origin: new Date().toISOString(), horizon_hours: next.horizon, mode: 'live' }
     try {
-      if (refresh) {
+      if (refresh && mode === 'live') {
         await refreshWeather(next.siteId, controller.signal)
         if (epoch !== requestEpoch.current) return
         setRefreshing(false)
       }
-      const forecast = await createForecast(input, controller.signal)
+      const forecast = mode === 'replay'
+        ? await createReplayForecast({ turbine_id: next.siteId, forecast_date: date, horizon_hours: next.horizon, weather_source: weatherSource }, controller.signal)
+        : await createForecast(input, controller.signal)
       if (epoch !== requestEpoch.current) return
       if (forecast.status !== 'ok' || !forecast.forecast_id || !forecast.model_input || !forecast.hours?.length) throw new Error(ru.incompleteForecast)
-      setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id ? lastSuccess.current : null)
+      setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id && lastSuccess.current?.mode === forecast.mode ? lastSuccess.current : null)
       lastSuccess.current = forecast
       setResult(forecast)
       rememberForecast(forecast.forecast_id)
       setLoading(false)
       await loadExplanation(forecast, controller, epoch)
     } catch (err) {
-      if (epoch === requestEpoch.current && !controller.signal.aborted) { lastSuccess.current = null; setError(errorMessage(err)); setLoading(false); setRefreshing(false) }
+      if (epoch === requestEpoch.current && !controller.signal.aborted) { lastSuccess.current = null; setError(err instanceof ApiFailure && err.code === 'WEATHER_UNAVAILABLE' && mode === 'replay' ? (weatherSource === 'verified' ? 'Операционный архив ECMWF для этой даты пока не подготовлен или не прошёл проверку времени публикации. Загрузите архив на сервере и повторите расчёт.' : 'Архивный выпуск для этой даты отсутствует или не прошёл проверку. Проверьте февральский комплект погоды на сервере.') : errorMessage(err)); setLoading(false); setRefreshing(false) }
     }
   }
 
@@ -224,30 +243,46 @@ export default function App() {
   return <div className="app-shell">
     <header className="page-header">
       <div><h1>{ru.pageTitle}</h1><p>{ru.pageSubtitle}</p></div>
-      <span className="mode-badge"><i />{ru.live}</span>
+      <span className="mode-badge"><i />{mode === 'replay' ? 'Февраль 2026 · исторический прогноз' : ru.live}</span>
     </header>
     <main className="workspace">
       <aside className="setup-column" aria-label={ru.selectForecast}>
         <section className="panel setup-panel">
           <div className="section-title"><h2>{ru.selectForecast}</h2></div>
+          <label className="field scenario-field"><span>Сценарий</span><select aria-label="Сценарий" value={mode} onChange={e => { invalidate(); setMode(e.target.value as 'replay' | 'live') }}><option value="replay">Февраль 2026 · задание жюри</option><option value="live">Текущий прогноз</option></select></label>
           <SiteMap sites={sites} selected={siteId} onSelect={id => { if (id !== siteId) { invalidate(); setSiteId(id) } }} />
           <label className="field"><span>{ru.turbine}</span><select aria-label={ru.turbine} value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">{ru.chooseTurbine}</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id}</option>)}</select></label>
           {selectedSite && <div className="site-meta"><span>{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.latitude)} · {new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.longitude)}</span><small>{coordinateLabel(selectedSite.coordinate_status)}</small>{selectedSite.coordinate_source && <a href={selectedSite.coordinate_source} target="_blank" rel="noreferrer">{ru.openMap} ↗</a>}</div>}
           {siteError && <div className="error-banner" role="alert">{siteError}</div>}
           <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
-          <p className="origin-note">{ru.liveTime}</p>
+          {mode === 'replay' && <div className="replay-controls">
+            <label className="field"><span>Подтверждение архивной погоды</span><select aria-label="Подтверждение архивной погоды" value={weatherSource} onChange={e => { invalidate(); setWeatherSource(e.target.value as 'verified' | 'provider-documented') }}><option value="verified">ECMWF: операционный архив</option><option value="provider-documented">Архив с допущением о доступности</option></select></label>
+            <p className="origin-note">{weatherSource === 'verified' ? 'Операционные выпуски ECMWF из публичного архива. Время публикации архивной копии проверяется по метаданным объекта и должно быть не позже момента расчёта.' : 'Условный вариант: архив поставщика с предполагаемой задержкой публикации 24 часа. Он не подтверждает полное соответствие требованию жюри.'}</p>
+            <label className="field"><span>Первый день прогноза</span><select aria-label="Первый день прогноза" value={date} onChange={e => { invalidate(); setDate(e.target.value) }}>{Array.from({ length: 28 }, (_, i) => { const value = `2026-02-${String(i + 1).padStart(2, '0')}`; return <option key={value} value={value}>{i + 1} февраля 2026</option> })}</select></label>
+            <div className="replay-navigation"><button type="button" className="secondary-button" disabled={date === '2026-02-01'} onClick={() => { invalidate(); setDate(shiftDate(date, -1)) }}>← День</button><button type="button" className="secondary-button" disabled={date === '2026-02-28'} onClick={() => { invalidate(); setDate(shiftDate(date, 1)) }}>День →</button></div>
+          </div>}
+          <p className="origin-note">{mode === 'replay' ? `Расчёт на ${shiftDate(date, -1).split('-').reverse().join('.')} в 23:00 (UTC+5). Прогноз начинается в 00:00 выбранного дня. После смены дня нажмите «Рассчитать прогноз».` : ru.liveTime}</p>
           <button className="primary-button" disabled={!siteId || loading} onClick={() => runForecast({ siteId, horizon })}>{loading ? (restoring ? ru.openingSavedForecast : refreshing ? ru.refreshingWeather : ru.calculating) : ru.predict}</button>
           {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
-        <p className="scope-note">{ru.liveNotice}</p>
+        <p className="scope-note">{mode === 'replay' ? '28 ежедневных запусков: с 31 января по 27 февраля, с покрытием 1–28 февраля. Используются архивные выпуски прогноза ECMWF IFS, а не фактическая погода. Горизонт 48 часов в конце периода захватывает март. Фактической мощности за февраль в переданных данных нет.' : ru.liveNotice}</p>
       </aside>
       <div className="results-column">
-        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? (restoring ? ru.openingSavedForecast : refreshing ? ru.refreshingWeather : ru.calculating) : ru.emptyTitle}</h2><p>{loading ? (restoring ? ru.savedForecastNotice : ru.loadingHint) : ru.emptyText}</p></section>}
+        {mode === 'replay' && <section className="panel replay-downloads"><h2>Комплект за весь февраль</h2><p>Обе турбины, ежедневные запуски. В отчёте указаны покрытие и происхождение погоды. Если подтверждённый комплект ещё не сформирован, сервер сообщит об этом.</p><div><a href="/api/replay/february/download?kind=forecast" download>Все прогнозы · CSV</a><a href="/api/replay/february/download?kind=daily" download>Первые 24 часа · CSV</a><a href="/api/replay/february/download?kind=report" download>Отчёт · JSON</a></div></section>}
+        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? (restoring ? ru.openingSavedForecast : refreshing ? ru.refreshingWeather : ru.calculating) : ru.emptyTitle}</h2><p>{loading ? (restoring ? ru.savedForecastNotice : ru.loadingHint) : mode === 'replay' ? 'Выберите турбину, день февраля и горизонт. Расчёт использует архивный прогноз погоды, сформированный до выбранного момента.' : ru.emptyText}</p></section>}
         {result && <>
           <section className="panel result-panel">
-            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><div className="result-actions"><button type="button" className="secondary-button" onClick={() => runForecast({ siteId, horizon }, true)}>{ru.refreshWeather}</button><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div></div>
+            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(result.weather_provenance.provenance_status)}</p></div><div className="result-actions"><>{result.mode === 'live' && <button type="button" className="secondary-button" onClick={() => runForecast({ siteId, horizon }, true)}>{ru.refreshWeather}</button>}</><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div></div>
             {restored && <p className="origin-note" role="status"><strong>{ru.savedForecast}.</strong> {ru.savedForecastNotice}</p>}
             <div className="weather-freshness" aria-label={ru.weatherRetrieved}><span><strong>{ru.weatherProvider}</strong> {weatherProviderLabel(result.weather_provenance.provider)}</span><span><strong>{ru.weatherRetrieved}</strong> {result.weather_provenance.retrieved_at ? localTime(result.weather_provenance.retrieved_at, result.timezone) : ru.weatherRetrievalUnknown}</span>{result.weather_provenance.weather_cache_hit === true && <span>{ru.cachedWeather}</span>}</div>
+            {result.mode === 'archive' && <div className="replay-evidence">
+              <h3>Исторический запуск</h3>
+              <dl><div><dt>Момент расчёта мощности</dt><dd>{localTime(result.origin, result.timezone)}</dd></div><div><dt>Инициализация прогноза погоды</dt><dd>{typeof result.weather_provenance.initialized_at === 'string' ? localTime(result.weather_provenance.initialized_at, result.timezone) : ru.notSpecified}</dd></div><div><dt>{result.weather_provenance.provenance_status === 'verified' ? 'Публикация архивной копии' : 'Предполагаемая доступность выпуска'}</dt><dd>{result.weather_provenance.provenance_status === 'verified' && typeof result.weather_provenance.available_at === 'string' ? localTime(result.weather_provenance.available_at, result.timezone) : typeof result.weather_provenance.assumed_available_by === 'string' ? localTime(result.weather_provenance.assumed_available_by, result.timezone) : ru.notSpecified}</dd></div></dl>
+              {result.weather_provenance.provenance_status !== 'verified' && <p className="warning-banner">Архивный прогноз по данным поставщика. Доступность выпуска в прошлом принята по правилу задержки 24 часа; фактическое время публикации не подтверждено. Это условное воспроизведение, а не подтверждённый журнал доступности.</p>}
+              {result.weather_provenance.provenance_status === 'verified' && <p>Метка публикации архивной копии — верхняя граница доступности: выпуск существовал к этому моменту. Точная дата первой публикации может быть раньше.</p>}
+              {(result.weather_provenance.interpolation && result.weather_provenance.interpolation !== 'none') && <p>Почасовые входы модели получены интерполяцией исходного прогноза. Метод: {provenanceLabel(String(result.weather_provenance.interpolation))}.</p>}
+              <p>Модель заморожена до тестового периода. Фактическая мощность за февраль отсутствует — оценка точности не рассчитывается.</p>
+            </div>}
             <div className="metrics">
               <div><span>{ru.meanPower}</span><strong>{percent(mean)}</strong><small>{ru.normalized}</small></div>
               <div><span>{ru.peakPower}</span><strong>{percent(result.analysis.peak_power_norm)}</strong><small>{localTime(result.analysis.peak_at, result.timezone)}</small></div>
