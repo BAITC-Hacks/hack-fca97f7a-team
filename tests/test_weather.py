@@ -1,8 +1,8 @@
 """Synthetic run identity and explicit archive boundary."""
 import pytest
 
-from contracts import ForecastError
-from weather import fetch_weather, load_sites
+from backend.core.contracts import ForecastError
+from backend.adapters.weather import fetch_weather, load_sites
 
 ORIGINS = ("2026-01-31T18:00:00Z", "2026-02-01T18:00:00Z")
 

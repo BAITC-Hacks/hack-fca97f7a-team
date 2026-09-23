@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from contracts import FIRST_ORIGIN, ForecastError
-from model import train_model
+from backend.core.contracts import FIRST_ORIGIN, ForecastError
+from backend.ml.model import train_model
 from scripts import compare_models
 
 

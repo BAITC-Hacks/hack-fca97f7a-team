@@ -7,11 +7,11 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from threading import RLock
 
-from contracts import (FEATURES, FIRST_ORIGIN, ForecastError, artifact_dir, expected_hours, fingerprint,
+from backend.core.contracts import (FEATURES, FIRST_ORIGIN, ForecastError, artifact_dir, expected_hours, fingerprint,
                        utc_time, validate_request)
-from model import load_model, predict_power_csv
-from model_input import write_model_input
-from weather import fetch_weather, load_sites
+from backend.ml.model import load_model, predict_power_csv
+from backend.ml.model_input import write_model_input
+from backend.adapters.weather import fetch_weather, load_sites
 
 _CACHE: OrderedDict[str, dict] = OrderedDict()
 _MAX_CACHE = 64

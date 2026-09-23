@@ -1,5 +1,5 @@
 > Current scope: the user removed historical archive/replay from the demo requirements.
-> The UI offers live weather and explicit synthetic fixtures only. Existing archive
+> The UI offers live weather only. Synthetic fixtures are internal test inputs. Existing archive
 > utilities are optional internal tooling, not a demo dependency or delivery blocker.
 > Historical references below do not expand the current scope.
 
@@ -10,7 +10,7 @@
 The active application is **React + FastAPI**. The user explicitly authorized
 this migration, real weather-to-CSV-to-model inference, and an OpenAI explanation
 adapter. Earlier instructions deferring React/FastAPI/LLM implementation are
-superseded. `app.py` is only the legacy Streamlit prototype.
+superseded. `legacy/app.py` is only the legacy Streamlit prototype.
 
 Read [CONTRACTS.md](CONTRACTS.md) before changing a module boundary. README is the
 launch/handoff guide; PLAN.md is the current scope. The latest user instruction
@@ -24,13 +24,13 @@ the three developers, with ownership, priorities and acceptance criteria.
 ## Required flow and boundaries
 
 1. React selects a registered turbine and submits an explicit forecast origin.
-2. `api.py` validates HTTP bodies and calls `agent.run_forecast`.
-3. `weather.py` normalizes provider output into hourly wind m/s and temperature °C.
-4. `model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
+2. `backend/api.py` validates HTTP bodies and calls `agent.run_forecast`.
+3. `backend/adapters/weather.py` normalizes provider output into hourly wind m/s and temperature °C.
+4. `backend/ml/model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
 5. `model.predict_power_csv` reads and validates that exact file before inference.
 6. The agent returns numeric predictions, statistics, provenance and actual trace.
 7. React shows the result and requests an explanation by server-stored forecast ID.
-8. `explanation.py` calls OpenAI with generated forecast facts, or returns an
+8. `backend/adapters/explanation.py` calls OpenAI with generated forecast facts, or returns an
    explicitly labeled computed fallback. Questions use the same stored result.
 
 No UI/framework imports in core modules. No weather or inference logic in React.
@@ -76,9 +76,9 @@ coordinate shared contracts and preserve concurrent edits.
 
 | Stream | Owns | Change here |
 |---|---|---|
-| A — integration/weather | api.py, agent.py, weather.py, contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |
-| B — data/model | data.py, model_input.py, model.py, scripts/train.py, corresponding tests | CSV feature schema, ingestion, predictor, replay |
-| C — frontend/explanation | frontend/, explanation.py, summary tests | UI, central API client/types, grounded prose/questions |
+| A — integration/weather | backend/api.py, backend/services/agent.py, backend/adapters/weather.py, backend/core/contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |
+| B — data/model | backend/ml/data.py, backend/ml/model_input.py, backend/ml/model.py, scripts/train.py, corresponding tests | CSV feature schema, ingestion, predictor, replay |
+| C — frontend/explanation | frontend/, backend/adapters/explanation.py, summary tests | UI, central API client/types, grounded prose/questions |
 
 Read CONTRACTS.md for signatures, DTOs, CSV version and change instructions.
 Coordinate shared contract changes with affected owners; prefer additive fields.
@@ -99,13 +99,11 @@ Python 3.12+ (verified 3.14.4), Node 22+. From repo root:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m scripts.make_fixtures
-python -m scripts.train --mode fixture
 python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
 python -m scripts.train_forecast --activate
 npm --prefix frontend ci
 npm --prefix frontend run build
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
 ```
 
 FastAPI serves the built React app at http://localhost:8000 and docs at /docs.
@@ -151,5 +149,5 @@ then fails clearly. Preserve archive chronology. No baseline in user forecasts,
 CSV or explanation inputs; evaluation baselines remain internal.
 
 Follow TEAM_WORKFLOW.md for branch integration and DEMO_CHECKLIST.md for browser
-checks and replay commands. scripts/replay writes a full forecast.csv only when
+checks. scripts/replay.py writes a full forecast.csv only when
 all 56 verified archive runs succeed; never mark partial/fixture replay complete.

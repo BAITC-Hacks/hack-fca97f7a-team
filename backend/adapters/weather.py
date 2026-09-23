@@ -15,7 +15,7 @@ from threading import RLock
 
 import httpx
 
-from contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, utc_time
+from backend.core.contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, utc_time
 
 SITES = (
     {"turbine_id": "T1", "latitude": 43.645150, "longitude": 78.535604,

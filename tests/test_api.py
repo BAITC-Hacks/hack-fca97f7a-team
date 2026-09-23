@@ -4,9 +4,7 @@ import hashlib
 
 from fastapi.testclient import TestClient
 
-import api
-
-
+from backend import api
 client = TestClient(api.app)
 VALID = {
     "turbine_id": "T1",
@@ -110,7 +108,7 @@ def test_explanations_use_stored_result_and_ignore_client_prediction(monkeypatch
 
 
 def test_unexpected_tool_failure_is_sanitized_http_500(monkeypatch):
-    import agent
+    from backend.services import agent
     secret = "secret-provider-internal-value"
 
     def broken_weather(*args):

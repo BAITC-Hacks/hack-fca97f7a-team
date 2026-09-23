@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from contracts import FIRST_ORIGIN, ForecastError
-from model import DEFAULT_VARIANT, MODEL_VARIANTS, load_model, predict_power, save_model, train_model
+from backend.core.contracts import FIRST_ORIGIN, ForecastError
+from backend.ml.model import DEFAULT_VARIANT, MODEL_VARIANTS, load_model, predict_power, save_model, train_model
 
 
 def training_history():

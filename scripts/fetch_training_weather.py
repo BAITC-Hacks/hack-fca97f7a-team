@@ -20,8 +20,8 @@ from pathlib import Path
 import httpx
 import pandas as pd
 
-from contracts import FIRST_ORIGIN, artifact_dir, utc_time
-from weather import SITES
+from backend.core.contracts import FIRST_ORIGIN, artifact_dir, utc_time
+from backend.adapters.weather import SITES
 
 URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 MODEL = "ecmwf_ifs"

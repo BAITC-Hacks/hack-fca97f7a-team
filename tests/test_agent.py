@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent
-from contracts import FIRST_ORIGIN
-from weather import fetch_weather
+from backend.services import agent
+from backend.core.contracts import FIRST_ORIGIN
+from backend.adapters.weather import fetch_weather
 
 
 def request(site="T1", origin=FIRST_ORIGIN, horizon=24, mode="fixture"):
@@ -23,7 +23,7 @@ def model_loader(site):
 def predictions(monkeypatch):
     calls = []
     def predict(model, path, **kwargs):
-        from model_input import read_model_input
+        from backend.ml.model_input import read_model_input
         rows = read_model_input(path, **kwargs)
         calls.append(len(rows))
         return [-0.2, 1.2] + [0.5] * (len(rows) - 2)

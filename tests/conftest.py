@@ -9,7 +9,7 @@ def offline_llm(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_live_weather_cache():
-    from weather import clear_live_weather_cache
+    from backend.adapters.weather import clear_live_weather_cache
     clear_live_weather_cache()
     yield
     clear_live_weather_cache()
@@ -19,8 +19,8 @@ def isolated_live_weather_cache():
 def provider_model_factory():
     """A real fitted estimator, with synthetic training data and explicit domain."""
     import pandas as pd
-    from model import train_model
-    from contracts import FIRST_ORIGIN
+    from backend.ml.model import train_model
+    from backend.core.contracts import FIRST_ORIGIN
 
     def make(turbine_id):
         frame = pd.DataFrame({"turbine_id": [turbine_id] * 96,

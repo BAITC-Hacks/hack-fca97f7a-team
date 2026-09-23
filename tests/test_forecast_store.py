@@ -7,10 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-import api
-import forecast_store
-
-
+from backend import api
+from backend.adapters import forecast_store
 ID = "a" * 64
 
 

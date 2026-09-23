@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import api
-import agent
-import weather
-from contracts import expected_hours, iso
+from backend import api
+from backend.services import agent
+from backend.adapters import weather
+from backend.core.contracts import expected_hours, iso
 
 
 @pytest.fixture

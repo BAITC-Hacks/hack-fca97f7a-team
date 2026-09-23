@@ -3,8 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from contracts import ForecastError, ROOT
-from data import COLUMNS, EXPECTED_SOURCE_SHA256, canonicalize, ingest_all
+from backend.core.contracts import ForecastError, ROOT
+from backend.ml.data import COLUMNS, EXPECTED_SOURCE_SHA256, canonicalize, ingest_all
 
 
 def write_source(path, timestamps, powers=None):
@@ -71,7 +71,7 @@ def test_invalid_source_clock_and_off_grid_values_are_excluded(tmp_path):
 def test_real_sources_are_distinct_and_suffixed_copies_ignored(tmp_path):
     # Confirm current actual inputs and exact-name selection, without ingesting 300k rows per test.
     import hashlib
-    from data import source_path
+    from backend.ml.data import source_path
     one, two = source_path("T1"), source_path("T2")
     assert hashlib.sha256(one.read_bytes()).hexdigest() != hashlib.sha256(two.read_bytes()).hexdigest()
     times = [f"2026-01-30 00:{m:02}:00" for m in range(0, 60, 10)]
@@ -85,14 +85,14 @@ def test_real_sources_are_distinct_and_suffixed_copies_ignored(tmp_path):
 
 
 def test_real_source_hashes_match_audited_identity():
-    from data import source_path
+    from backend.ml.data import source_path
     import hashlib
     for turbine, expected in EXPECTED_SOURCE_SHA256.items():
         assert hashlib.sha256(source_path(turbine).read_bytes()).hexdigest() == expected
 
 
 def test_identical_files_cannot_be_two_turbines(tmp_path):
-    from data import source_path
+    from backend.ml.data import source_path
     times = [f"2026-01-30 00:{m:02}:00" for m in range(0, 60, 10)]
     one, two = source_path("T1", tmp_path), source_path("T2", tmp_path)
     write_source(one, times)

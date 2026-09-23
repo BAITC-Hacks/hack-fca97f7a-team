@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import pytest
 
-from contracts import ForecastError
+from backend.core.contracts import ForecastError
 from scripts.train_forecast import align_history, promotion_gate, temporal_window
 
 
@@ -51,7 +51,7 @@ def test_confirmation_boundaries_and_gate_tradeoff():
 
 
 def test_provider_comparison_preserves_original_measured_control():
-    from model import predict_power, train_model
+    from backend.ml.model import predict_power, train_model
     from scripts.train_forecast import comparison
 
     stamps = pd.date_range("2025-12-25T00:00:00Z", "2026-01-03T00:00:00Z", freq="h")

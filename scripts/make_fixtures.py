@@ -6,8 +6,8 @@ import json
 import math
 from datetime import timedelta
 
-from contracts import fixture_dir, iso, utc_time
-from weather import SITES
+from backend.core.contracts import fixture_dir, iso, utc_time
+from backend.adapters.weather import SITES
 
 RUNS = (
     ("r1", "2026-01-31T18:00:00Z", "2026-01-31T06:00:00Z", "2026-01-31T14:00:00Z"),

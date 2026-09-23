@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from contracts import FIRST_ORIGIN, expected_hours
+from backend.core.contracts import FIRST_ORIGIN, expected_hours
 from scripts.replay import run_replay
 
 

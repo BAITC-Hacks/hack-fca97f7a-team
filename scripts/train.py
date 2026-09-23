@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from contracts import FIRST_ORIGIN, FEATURES, SITE_IDS, ForecastError, artifact_dir
-from data import ingest_all, save_canonical
-from model import DEFAULT_VARIANT, MODEL_VARIANTS, save_model, train_model, predict_power
+from backend.core.contracts import FIRST_ORIGIN, FEATURES, SITE_IDS, ForecastError, artifact_dir
+from backend.ml.data import ingest_all, save_canonical
+from backend.ml.model import DEFAULT_VARIANT, MODEL_VARIANTS, save_model, train_model, predict_power
 
 
 def _diagnose(history: pd.DataFrame, turbine_id: str, output_dir: Path,

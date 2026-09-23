@@ -15,8 +15,8 @@ from datetime import timedelta
 from pathlib import Path
 import tempfile
 
-from agent import run_forecast
-from contracts import FIRST_ORIGIN, SITE_IDS, CSV_FIELDS, artifact_dir, expected_hours, forecast_csv, iso, utc_time
+from backend.services.agent import run_forecast
+from backend.core.contracts import FIRST_ORIGIN, SITE_IDS, CSV_FIELDS, artifact_dir, expected_hours, forecast_csv, iso, utc_time
 
 
 def _atomic_write(path: Path, content: str) -> None:
