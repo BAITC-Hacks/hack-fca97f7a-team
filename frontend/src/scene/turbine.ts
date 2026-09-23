@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { windVisualProfile } from './wind'
 
 export interface TurbineModel {
   group: THREE.Group
@@ -184,8 +185,8 @@ function createLandscapeMotion(heightAt: (x: number, z: number) => number, neigh
         vBladeHeight = uv.y;
         float phase = instanceMatrix[3].x * 57.0 + instanceMatrix[3].z * 39.0;
         float sway = sin(grassTime * 1.65 + phase) * 0.7 + sin(grassTime * 0.73 + phase*0.43) * 0.3;
-        transformed.x += sway * grassWind * uv.y * uv.y * 0.00050;
-        transformed.z += cos(grassTime * 1.2 + phase) * grassWind * uv.y * uv.y * 0.00016;
+        transformed.x += (0.00025 + sway * 0.00065) * grassWind * uv.y * uv.y;
+        transformed.z += cos(grassTime * 1.2 + phase) * grassWind * uv.y * uv.y * 0.00025;
       `)
     shader.fragmentShader = `uniform float grassNight; varying float vBladeHeight;\n${shader.fragmentShader}`
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -226,60 +227,101 @@ function createLandscapeMotion(heightAt: (x: number, z: number) => number, neigh
   group.add(grass)
 
   const dustGeometry = new THREE.BufferGeometry()
-  const dustPositions = new Float32Array(72 * 3)
-  for (let i = 0; i < 72; i++) dustPositions.set([(random(i * 3) - 0.5) * 0.65, 0.006 + random(i * 3 + 1) * 0.065, (random(i * 3 + 2) - 0.5) * 0.65], i * 3)
+  const dustPositions = new Float32Array(192 * 3)
+  for (let i = 0; i < 192; i++) dustPositions.set([(random(i * 3) - 0.5) * 0.9, 0.006 + random(i * 3 + 1) * 0.145, (random(i * 3 + 2) - 0.5) * 0.9], i * 3)
   dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3))
   const dustMaterial = new THREE.PointsMaterial({ color: '#f9e6b4', size: 1.4, sizeAttenuation: false, transparent: true, opacity: 0.16, depthWrite: false })
-  const dust = new THREE.Points(dustGeometry, dustMaterial)
-  dust.frustumCulled = false; group.add(dust)
-  const wisps = new THREE.Group()
-  const wispMaterial = new THREE.LineBasicMaterial({ color: '#f3f4d3', transparent: true, opacity: 0.075, depthWrite: false })
-  for (let i = 0; i < 5; i++) {
-    const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-0.06, 0, 0), new THREE.Vector3(-0.025, 0.0016, -0.001),
-      new THREE.Vector3(0.018, 0.0022, 0.0012), new THREE.Vector3(0.055, 0, 0),
-    ])
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(20)), wispMaterial)
-    line.position.set((random(i + 50) - 0.5) * 0.7, 0.016 + random(i + 70) * 0.07, (random(i + 90) - 0.5) * 0.5)
-    wisps.add(line)
+  dustMaterial.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+      float pointRadius = length(gl_PointCoord - vec2(0.5));
+      diffuseColor.a *= 1.0 - smoothstep(0.15,0.5,pointRadius);
+      #include <opaque_fragment>
+    `)
   }
-  group.add(wisps)
+  dustMaterial.customProgramCacheKey = () => 'samal-wind-points-v1'
+  const dust = new THREE.Points(dustGeometry, dustMaterial)
+  dust.name = 'Художественные частицы воздушного потока'
+  dust.frustumCulled = false; group.add(dust)
+  // One instanced draw keeps strong wind legible without a particle wall or postprocessing.
+  const ribbonGeometry = new THREE.PlaneGeometry(1, 1, 32, 1)
+  const ribbonUniforms = { width: { value: 0.001 }, curve: { value: 0.004 }, time: uniforms.time }
+  const ribbonMaterial = new THREE.MeshBasicMaterial({
+    color: '#f3f7df', side: THREE.DoubleSide, transparent: true, opacity: 0,
+    depthWrite: false, toneMapped: false,
+  })
+  ribbonMaterial.onBeforeCompile = shader => {
+    shader.uniforms.flowWidth = ribbonUniforms.width
+    shader.uniforms.flowCurve = ribbonUniforms.curve
+    shader.uniforms.flowTime = ribbonUniforms.time
+    shader.vertexShader = `uniform float flowWidth; uniform float flowCurve; uniform float flowTime; varying vec2 vFlowUv;\n${shader.vertexShader}`
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vFlowUv = uv;
+        float phase = instanceMatrix[3].y * 35.0 + instanceMatrix[3].z * 5.0;
+        transformed.y = position.y * flowWidth + sin(uv.x * 4.0 + phase + flowTime * 0.25) * flowCurve;
+        transformed.z += sin(uv.x * 3.2 + phase) * flowCurve * 0.35;
+      `)
+    shader.fragmentShader = `varying vec2 vFlowUv;\n${shader.fragmentShader}`
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float along = smoothstep(0.0,0.22,vFlowUv.x) * (1.0 - smoothstep(0.55,1.0,vFlowUv.x));
+        float across = pow(max(0.0,1.0 - abs(vFlowUv.y-0.5)*2.0),1.6);
+        diffuseColor.a *= along * across;
+      `)
+  }
+  ribbonMaterial.customProgramCacheKey = () => 'samal-wind-ribbons-v1'
+  const ribbons = new THREE.InstancedMesh(ribbonGeometry, ribbonMaterial, 24)
+  ribbons.name = 'Художественные линии воздушного потока'
+  ribbons.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+  ribbons.frustumCulled = false
+  const ribbonPositions = Array.from({ length: 24 }, (_, i) => new THREE.Vector3(
+    (random(i + 50) - 0.5) * 0.85, 0.014 + random(i + 70) * 0.14, (random(i + 90) - 0.5) * 0.85,
+  ))
+  const ribbonTransform = new THREE.Object3D()
+  group.add(ribbons)
   return {
     group,
     update(delta: number, wind: number, bearing: number | null, reduced: boolean, quality: string, daylight: number) {
-      const intensity = Math.min(1, Math.max(0, wind) / 12)
+      const flow = windVisualProfile(wind, reduced, quality)
       uniforms.night.value = 1 - daylight
       material.emissiveIntensity = daylight * 0.12
-      uniforms.strength.value = reduced ? 0 : intensity
-      if (!reduced) uniforms.time.value += delta * (0.45 + wind * 0.07)
+      uniforms.strength.value = flow.strength
+      if (!reduced && flow.speed > 0) uniforms.time.value += delta * flow.speed * 0.14
       grass.count = quality === 'low' ? 0 : quality === 'medium' ? Math.min(written, 6500) : written
-      const moving = !reduced && quality !== 'low' && wind > 2
-      dust.visible = moving; wisps.visible = moving
-      dustMaterial.opacity = (0.07 + daylight * 0.11) * intensity
-      wispMaterial.opacity = (0.03 + daylight * 0.06) * intensity
-      if (!moving) return
+      dust.visible = flow.particles > 0; ribbons.visible = flow.ribbons > 0
+      dustGeometry.setDrawRange(0, flow.particles)
+      dustMaterial.opacity = flow.opacity * (0.6 + daylight * 0.4)
+      dustMaterial.size = 1.25 + flow.strength * 1.15
+      ribbons.count = flow.ribbons
+      ribbonMaterial.opacity = flow.opacity * (0.75 + daylight * 0.25)
+      ribbonUniforms.width.value = flow.width
+      ribbonUniforms.curve.value = 0.002 + flow.strength * 0.004
+      if (!flow.ribbons) return
       // Absent bearing is an expressly illustrative, curved drift, not telemetry.
-      const direction = bearing == null ? 0.7 : bearing * Math.PI / 180 + Math.PI / 2
-      const dx = Math.cos(direction) * wind * 0.001 * delta
-      const dz = Math.sin(direction) * wind * 0.001 * delta
-      for (let i = 0; i < 72; i++) {
+      const direction = bearing == null ? 0.2 : bearing * Math.PI / 180 + Math.PI / 2
+      const dx = Math.cos(direction) * flow.speed * 0.001 * delta
+      const dz = Math.sin(direction) * flow.speed * 0.001 * delta
+      for (let i = 0; i < 192; i++) {
         dustPositions[i * 3] += dx
         dustPositions[i * 3 + 2] += dz
-        if (dustPositions[i * 3] > 0.4) dustPositions[i * 3] -= 0.8
-        if (dustPositions[i * 3] < -0.4) dustPositions[i * 3] += 0.8
-        if (dustPositions[i * 3 + 2] > 0.4) dustPositions[i * 3 + 2] -= 0.8
-        if (dustPositions[i * 3 + 2] < -0.4) dustPositions[i * 3 + 2] += 0.8
+        if (dustPositions[i * 3] > 0.5) dustPositions[i * 3] -= 1
+        if (dustPositions[i * 3] < -0.5) dustPositions[i * 3] += 1
+        if (dustPositions[i * 3 + 2] > 0.5) dustPositions[i * 3 + 2] -= 1
+        if (dustPositions[i * 3 + 2] < -0.5) dustPositions[i * 3 + 2] += 1
       }
       dustGeometry.attributes.position.needsUpdate = true
-      for (const [index, line] of wisps.children.entries()) {
-        line.position.x += dx; line.position.z += dz
-        line.rotation.y = -direction
-        line.position.y += Math.sin(uniforms.time.value * 0.35 + index) * delta * 0.0006
-        if (line.position.x > 0.45) line.position.x -= 0.9
-        if (line.position.x < -0.45) line.position.x += 0.9
-        if (line.position.z > 0.45) line.position.z -= 0.9
-        if (line.position.z < -0.45) line.position.z += 0.9
+      for (let i = 0; i < ribbonPositions.length; i++) {
+        const position = ribbonPositions[i]
+        position.x += dx; position.z += dz
+        if (position.x > 0.5) position.x -= 1
+        if (position.x < -0.5) position.x += 1
+        if (position.z > 0.5) position.z -= 1
+        if (position.z < -0.5) position.z += 1
+        ribbonTransform.position.copy(position)
+        ribbonTransform.rotation.y = -direction
+        ribbonTransform.scale.set(flow.length * (0.75 + random(i + 120) * 0.5), 1, 1)
+        ribbonTransform.updateMatrix()
+        ribbons.setMatrixAt(i, ribbonTransform.matrix)
       }
+      ribbons.instanceMatrix.needsUpdate = true
     },
   }
 }

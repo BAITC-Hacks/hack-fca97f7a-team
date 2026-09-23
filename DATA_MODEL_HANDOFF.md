@@ -1,5 +1,11 @@
 # Data and model handoff
 
+**Current provider model:** see [FORECASTING_REPORT.md](FORECASTING_REPORT.md) for
+the new ECMWF IFS profile, chronological evaluation and launch commands. Sections
+below describe the original measured-weather model, still used by fixture mode.
+Live/verified archive use separate models trained on Historical Forecast API
+features. Heights are not converted; the original sensor height is unknown.
+
 The active React + FastAPI application and its exact routes, DTOs, CSV schema and
 Python interfaces are documented in [CONTRACTS.md](CONTRACTS.md). This handoff
 records the measured data audit and the feature agreement needed by the weather
@@ -7,7 +13,7 @@ and model streams. It does not establish access to operational weather archives.
 
 ## Source audit
 
-`data.py` selects the two exact supplied filenames, separately identifies T1/T2,
+`backend/ml/data.py` selects the two exact supplied filenames, separately identifies T1/T2,
 and rejects identical source files. Supplied CSVs and the organizer brief are
 unchanged. The source filename says February 2026, but both files end at local
 `2026-01-31 23:50:00`; neither contains a February 2026 row.
@@ -53,20 +59,21 @@ consuming the exact downloadable input CSV, with zero clipped values.
 | `power_norm` | Source normalized active power, averaged over a complete hour | Output in [0,1] | Capacity and normalization denominator are unknown; no MW/MWh conversion or farm total. |
 
 The canonical inference CSV is version `weather-features-v1` with columns
-`turbine_id,valid_at,wind_speed_ms,temperature_c`. `model_input.py` writes the
+`turbine_id,valid_at,wind_speed_ms,temperature_c`. `backend/ml/model_input.py` writes the
 content-addressed CSV and `model.predict_power_csv` reads and validates the exact
 bytes before inference. The model expects `[wind_speed_ms, temperature_c]` in that
-order. `weather.py` registers the user-provided T1/T2 coordinates
+order. `backend/adapters/weather.py` registers the user-provided T1/T2 coordinates
 `43.645150, 78.535604` and `43.643198, 78.538828` with their Google Maps
 source links, as specified in [CONTRACTS.md](CONTRACTS.md). No target column
-enters the CSV. Weather remains explicitly synthetic; the adapter does not
-declare wind height, a real provider, or as-issued availability. In particular,
+enters the CSV. Fixture weather remains explicitly synthetic. Real-weather modes
+declare the fixed ECMWF IFS provider and 10 m feature height. In particular,
 there is **no justified wind-height conversion** at this stage. A future provider
 must document its target height, interpolation and available-at evidence before
 claiming physical alignment with the measured feature or archive readiness.
 
-The model was fit on measured weather but is asked to predict from forecast
-weather. This domain shift has not been measured. Any chronological holdout
+The original model was fit on measured weather but was asked to predict from forecast
+weather. This domain shift is now measured and addressed by a separate provider
+profile; it remains an important limit on the original model. Any chronological holdout
 using measured features evaluates the regression fit under measured inputs; it
 is not accuracy of the end-to-end weather forecast. No weather archive, February
 replay or February truth is present, so forecast accuracy is unclaimed.
@@ -96,7 +103,7 @@ python -m scripts.evaluate --output-dir artifacts/evaluation
 python -m pytest -q
 npm --prefix frontend ci
 npm --prefix frontend run build
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
 ```
 
 Generated canonical history/audits live in ignored `data/canonical/`; fitted

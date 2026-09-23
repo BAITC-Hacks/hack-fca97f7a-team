@@ -22,7 +22,6 @@ export interface ForecastHour {
   wind_speed_ms: number
   temperature_c: number
   power_norm: number
-  baseline_norm: number
 }
 
 export interface ModelInput {
@@ -39,6 +38,22 @@ export interface TraceStep {
   detail: string
 }
 
+export interface WeatherProvenance {
+  provenance_status: string
+  provider?: string
+  retrieved_at?: string | null
+  weather_cache_hit?: boolean
+  [key: string]: string | number | boolean | null | undefined
+}
+
+export interface ModelProvenance {
+  profile: string
+  training_weather_kind: string
+  forecast_accuracy_verified: boolean
+  weather_model: string
+  wind_height_m: number
+}
+
 export interface ForecastResult extends ForecastRequest {
   status: 'ok'
   forecast_id: string
@@ -49,7 +64,8 @@ export interface ForecastResult extends ForecastRequest {
   fingerprint: string
   cache_hit: boolean
   train_last_interval_start: string
-  weather_provenance: Record<string, string>
+  weather_provenance: WeatherProvenance
+  model_provenance?: ModelProvenance
   hours: ForecastHour[]
   analysis: {
     peak_power_norm: number

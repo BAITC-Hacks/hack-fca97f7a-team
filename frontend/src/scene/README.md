@@ -36,8 +36,13 @@ an operating RPM estimate; supplied RPM takes precedence.
 Quality bounds DPR (1 / 1.25 / 2), shadows (off / 512 / 1024), precipitation,
 and drops quality after a sustained slow frame window in Auto. No postprocessing
 or volumetric raymarching is used. Vegetation is one instanced draw (14,000 tufts,
-6,500 in Medium, omitted in Low). Its shader sways with supplied wind speed; only
-72 particles and five understated wind traces are used. Their direction is
+6,500 in Medium, omitted in Low). Its shader bends and sways with supplied wind
+speed. Airflow is one instanced ribbon draw, capped at 24 tapered ribbons and
+192 soft particles (16/104 in Medium, omitted in Low). Density, ribbon length,
+width, opacity, vegetation bend and advection respond to the interpolated actual
+wind: 2 m/s shows no airflow, 6 m/s is clearly lighter than 10 m/s. Illustrative
+motion is capped at 22 m/s; displayed meteorological values are never capped.
+These are artistic flow traces, not measured gusts. Their direction is
 illustrative when the API does not supply a bearing. Sun rays are lightweight
 shader scattering aligned to the calculated sun, not a cloud observation.
 A hidden tab suspends frames. Reduced motion

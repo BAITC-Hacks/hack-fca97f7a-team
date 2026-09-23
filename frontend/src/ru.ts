@@ -1,5 +1,5 @@
 export const ru = {
-  title: 'Прогноз мощности · Исторический запуск',
+  title: 'Прогноз мощности ветровых турбин',
   pageTitle: 'Прогноз мощности',
   pageSubtitle: 'Ветровые турбины · почасовой прогноз',
   resultTitle: 'Прогноз и показатели',
@@ -16,17 +16,27 @@ export const ru = {
   loadingHint: 'Получаем погодные данные и рассчитываем мощность.',
   replay: 'ИСТОРИЧЕСКИЙ ПРОГНОЗ', demo: 'ЛОКАЛЬНОЕ ДЕМО',
   kicker: 'ПРОГНОЗ ВЕТРОЭНЕРГИИ / 01', heroStart: 'Мощность', heroEnd: 'под прогнозом.',
-  heroText: 'Исследуйте почасовой прогноз по измерениям турбин и погодным признакам. Сдвиньте дату запуска, чтобы сравнить результаты.',
+  heroText: 'Исследуйте почасовой прогноз мощности по текущему прогнозу погоды.',
   heroSide: 'ПОЧАСОВОЙ ПРОГНОЗ',
   notice: 'Погода демонстрационная. Модель обучена на измерениях турбин. Мощность нормализована от 0 до 1; значения на графике показаны в процентах этой шкалы.',
-  configure: '01 / ПАРАМЕТРЫ', selectForecast: 'Настройка прогноза', selectHint: 'Выберите зарегистрированную турбину и дату запуска.',
+  configure: '01 / ПАРАМЕТРЫ', selectForecast: 'Настройка прогноза', selectHint: 'Выберите зарегистрированную турбину и горизонт.',
   registeredTurbine: 'ЗАРЕГИСТРИРОВАННАЯ ТУРБИНА', coordinates: 'Координаты пользователя',
   mapHint: 'Координаты из предоставленных ссылок Google Maps.',
   turbine: 'Турбина', chooseTurbine: 'Выберите турбину', originDate: 'Дата запуска', horizon: 'Горизонт', hours24: '24 часа', hours48: '48 часов',
-  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Настоящий прогноз Open-Meteo. Модель обучена на истории турбин; ветер 10 м — приближение. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
+  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Текущий прогноз Open-Meteo ECMWF IFS. Модель обучена на погоде этого источника и измеренной мощности. Точность на 24–48 часов пока не подтверждена. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
   calculating: 'Формируем прогноз…', predict: 'Сформировать прогноз',
+  refreshWeather: 'Обновить погоду и прогноз', refreshingWeather: 'Обновляем погоду…',
+  weatherProvider: 'Источник погоды', weatherProviderUnknown: 'Не указан', weatherRetrieved: 'Погода получена', weatherRetrievalUnknown: 'Время получения не указано',
+  cachedWeather: 'Погода из кеша',
+  savedForecast: 'Сохранённый прогноз',
+  savedForecastNotice: 'Показан ранее рассчитанный прогноз. Время получения погоды указано ниже. Чтобы получить актуальный прогноз, обновите погоду.',
+  savedForecastUnavailable: 'Сохранённый прогноз больше не доступен. Сформируйте новый прогноз.',
+  savedForecastLoadFailed: 'Не удалось открыть сохранённый прогноз. Повторите попытку позже или сформируйте новый.',
+  openingSavedForecast: 'Открываем сохранённый прогноз…',
+  loadExplanation: 'Получить объяснение',
+  savedExplanationHint: 'Объяснение сохранённого прогноза загружается по запросу.',
   pipelineWeather: 'ПОГОДА', pipelineCsv: 'ВХОДНОЙ CSV', pipelineModel: 'МОДЕЛЬ', pipelineExplanation: 'ОБЪЯСНЕНИЕ',
-  awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину, дату и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
+  awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
   result: '02 / РЕЗУЛЬТАТ ПРОГНОЗА', ready: '● ГОТОВО',
   meanPower: 'Средняя мощность', peakPower: 'Максимум', lowestPower: 'Минимум', normalized: 'нормализованная мощность',
   chart: 'Почасовая нормализованная мощность', forecast: 'Прогноз',
@@ -39,7 +49,7 @@ export const ru = {
   localHour: 'Местный час', previous: 'Ранее', current: 'Сейчас', change: 'Изменение',
   hourlyData: 'Почасовые данные', lead: 'Шаг', wind: 'Ветер, м/с', temperature: 'Температура, °C', power: 'Мощность',
   provenance: 'Происхождение данных и этапы расчёта', steps: 'этапов', weatherRun: 'Запуск погоды', model: 'Модель', trainingCutoff: 'Конец обучения', cached: 'Результат из кеша', yes: 'Да', no: 'Нет',
-  advance: 'Следующий день и новый прогноз', footer: 'Время указано в часовом поясе Asia/Almaty. Доступны демонстрационные запуски 31 января и 1 февраля 2026 года.',
+  advance: 'Следующий день и новый прогноз', footer: 'Время указано в часовом поясе Asia/Almaty. Погода поступает из текущего прогноза Open-Meteo.',
   noSites: 'Нет доступных зарегистрированных турбин.', noArchiveSites: 'Список турбин для архивного режима недоступен.',
   incompleteForecast: 'Ответ сервера не содержит полного прогноза.', staleExplanation: 'Объяснение относится к другому прогнозу.', staleAnswer: 'Ответ относится к другому прогнозу.', requestFailed: 'Не удалось завершить запрос.',
   originAt: 'Прогноз выпущен в 23:00', local: 'местного времени', utc: 'UTC',
@@ -62,6 +72,10 @@ const fields: Record<string, string> = {
   initialized_at: 'Время выпуска', available_at: 'Время доступности', availability_basis: 'Основание доступности',
   retrieved_at: 'Время получения', provenance_status: 'Статус происхождения', raw_sha256: 'Контрольная сумма источника', interpolation: 'Интерполяция',
   coordinate_status: 'Статус координат',
+  weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
+  temperature_height_m: 'Высота температуры, м', wind_height_status: 'Смысл высоты ветра',
+  grid_latitude: 'Широта погодной сетки', grid_longitude: 'Долгота погодной сетки',
+  forecast_sha256: 'Контрольная сумма погодного прогноза',
 }
 export const fieldLabel = (key: string) => fields[key] || key.replaceAll('_', ' ')
 export const statusLabel = (status: string) => ({ ok: 'ГОТОВО', cached: 'ИЗ КЕША', retry: 'ПОВТОР', error: 'ОШИБКА' }[status] || status)
@@ -74,7 +88,12 @@ export const provenanceLabel = (value: string) => ({
   live: ru.live, fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
+  provider_feature_not_sensor_measurement: 'Признак погодного провайдера; не измерение датчика турбины',
+  live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS', user_provided: ru.coordinates,
 }[value] || value)
+export const weatherProviderLabel = (value?: string) => value?.startsWith('Open-Meteo Forecast')
+  ? 'Open-Meteo · ECMWF IFS'
+  : value?.startsWith('Open-Meteo Single Runs') ? 'Open-Meteo · ECMWF IFS (архив)' : value || ru.weatherProviderUnknown
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')
 export function provenanceValue(key: string, value: string, zone: string): string {
   if (key.endsWith('_at') && !Number.isNaN(Date.parse(value))) return localTime(value, zone)
@@ -100,9 +119,9 @@ export function traceDetail(step: string, detail: string): string {
 
 export const apiErrors: Record<string, string> = {
   NOT_FOUND: 'Прогноз больше не доступен. Сформируйте его заново.',
-  INVALID_REQUEST: 'Проверьте турбину, дату и горизонт, затем повторите запрос.',
-  INVALID_INPUT: 'Проверьте турбину, дату и горизонт, затем повторите запрос.',
-  WEATHER_UNAVAILABLE: 'Погода для выбранной даты недоступна. Выберите дату с демонстрационными данными или повторите позже.',
+  INVALID_REQUEST: 'Проверьте турбину и горизонт, затем повторите запрос.',
+  INVALID_INPUT: 'Проверьте турбину и горизонт, затем повторите запрос.',
+  WEATHER_UNAVAILABLE: 'Текущий прогноз погоды недоступен. Повторите запрос позже.',
   DATA_INVALID: 'Входные данные прогноза не прошли проверку. Повторите запрос.',
   MODEL_INVALID: 'Модель вернула некорректные данные. Повторите запрос позже.',
   MODEL_UNAVAILABLE: 'Модель временно недоступна. Повторите запрос позже.',
@@ -110,4 +129,5 @@ export const apiErrors: Record<string, string> = {
   EXPLANATION_FAILED: 'Не удалось подготовить объяснение. Числовой прогноз доступен ниже.',
   HTTP_ERROR: 'Запрос не выполнен. Повторите попытку.',
   REQUEST_FAILED: 'Не удалось выполнить запрос. Повторите попытку.',
+  REFRESH_FAILED: 'Не удалось обновить погоду. Повторите попытку.',
 }

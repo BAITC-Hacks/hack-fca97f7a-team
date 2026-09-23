@@ -7,12 +7,15 @@ import math
 import os
 import re
 import tempfile
+import time
+from collections import OrderedDict
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from threading import RLock
 
 import httpx
 
-from contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, utc_time
+from backend.core.contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, utc_time
 
 SITES = (
     {"turbine_id": "T1", "latitude": 43.645150, "longitude": 78.535604,
@@ -134,7 +137,8 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
             "availability_basis": record["availability_basis"] + ":" + record["evidence_ref"],
             "provenance_status": "verified", "raw_sha256": digest,
             "forecast_sha256": canonical_digest, "interpolation": "none",
-            "wind_height_m": 10, "wind_height_status": "proxy_not_hub_height",
+            "wind_height_m": 10, "temperature_height_m": 2, "weather_model": "ecmwf_ifs",
+            "wind_height_status": "provider_feature_not_sensor_measurement",
             "grid_latitude": data.get("latitude"), "grid_longitude": data.get("longitude")}, "rows": rows}
 
 
@@ -231,35 +235,81 @@ def _save_raw(raw, digest):
 
 
 LIVE_URL = "https://api.open-meteo.com/v1/forecast"
+_LIVE_CACHE_TTL_SECONDS = 300
+_LIVE_CACHE_MAX_ENTRIES = 8
+_LIVE_CACHE: OrderedDict[str, dict] = OrderedDict()
+_LIVE_CACHE_LOCK = RLock()
+
+
+def clear_live_weather_cache(turbine_id: str | None = None) -> None:
+    """Discard all live HTTP payloads, or those belonging to one turbine."""
+    with _LIVE_CACHE_LOCK:
+        if turbine_id is None:
+            _LIVE_CACHE.clear()
+        else:
+            for key in list(_LIVE_CACHE):
+                if _LIVE_CACHE[key]["turbine_id"] == turbine_id:
+                    del _LIVE_CACHE[key]
 
 
 def _live_weather(site: dict, origin: str, horizon_hours: int) -> dict:
     now = datetime.now(timezone.utc)
     if utc_time(origin) != now.replace(minute=0, second=0, microsecond=0):
-        raise ForecastError("INVALID_INPUT", "Настоящий прогноз доступен от текущего часа; обновите запрос.")
+        raise ForecastError("LIVE_ORIGIN_CHANGED", "Во время загрузки погоды начался новый час UTC; прогноз будет обновлён.")
     params = {"latitude": site["latitude"], "longitude": site["longitude"],
               "hourly": "temperature_2m,wind_speed_10m", "wind_speed_unit": "ms",
-              "temperature_unit": "celsius", "timezone": "UTC", "forecast_days": 3}
-    try:
-        response = httpx.get(LIVE_URL, params=params, timeout=15.0, follow_redirects=False)
-        if response.status_code == 429:
-            raise _unavailable("Лимит погодного API исчерпан; повторите запрос позже.")
-        if response.status_code != 200:
-            raise _unavailable("Погодный API недоступен; повторите запрос позже.")
-        raw = response.content
+              "temperature_unit": "celsius", "timezone": "UTC", "forecast_days": 3,
+              "models": "ecmwf_ifs"}
+    key = json.dumps([site["turbine_id"], LIVE_URL, params], sort_keys=True, separators=(",", ":"))
+    with _LIVE_CACHE_LOCK:
+        entry = _LIVE_CACHE.get(key)
+        if entry is not None and (time.monotonic() - entry["cached_at"] >= _LIVE_CACHE_TTL_SECONDS
+                                  or not timedelta(0) <= now - utc_time(entry["retrieved_at"]) < timedelta(minutes=5)):
+            del _LIVE_CACHE[key]
+            entry = None
+        if entry is not None:
+            _LIVE_CACHE.move_to_end(key)
+    cache_hit = entry is not None
+    if cache_hit:
+        raw, retrieved = entry["raw"], entry["retrieved_at"]
         data = json.loads(raw)
-    except httpx.HTTPError as exc:
-        raise _unavailable("Не удалось получить настоящую погоду; повторите запрос позже.") from exc
-    except (UnicodeError, ValueError) as exc:
-        raise ForecastError("DATA_INVALID", "Ответ погодного API имеет неверный формат.") from exc
-    rows, grid_lat, grid_lon, _ = _parse_forecast(data, origin, horizon_hours)
-    retrieved = iso(datetime.now(timezone.utc))
+        try:
+            rows, grid_lat, grid_lon, _ = _parse_forecast(data, origin, horizon_hours)
+        except ForecastError:
+            # A shorter successful request can have insufficient coverage for 48 hours.
+            cache_hit = False
+    if not cache_hit:
+        try:
+            response = httpx.get(LIVE_URL, params=params, timeout=15.0, follow_redirects=False)
+            if response.status_code == 429:
+                raise _unavailable("Лимит погодного API исчерпан; повторите запрос позже.")
+            if response.status_code != 200:
+                raise _unavailable("Погодный API недоступен; повторите запрос позже.")
+            raw = response.content
+            retrieved = iso(datetime.now(timezone.utc))
+            if not utc_time(origin) <= utc_time(retrieved) < utc_time(origin) + timedelta(hours=1):
+                raise ForecastError("LIVE_ORIGIN_CHANGED", "Во время загрузки погоды начался новый час UTC; прогноз будет обновлён.")
+            data = json.loads(raw)
+        except httpx.HTTPError as exc:
+            raise _unavailable("Не удалось получить настоящую погоду; повторите запрос позже.") from exc
+        except (UnicodeError, ValueError) as exc:
+            raise ForecastError("DATA_INVALID", "Ответ погодного API имеет неверный формат.") from exc
+        rows, grid_lat, grid_lon, _ = _parse_forecast(data, origin, horizon_hours)
     digest = hashlib.sha256(raw).hexdigest()
     _save_raw(raw, digest)
+    if not cache_hit:
+        with _LIVE_CACHE_LOCK:
+            _LIVE_CACHE[key] = {"turbine_id": site["turbine_id"], "raw": raw,
+                                "retrieved_at": retrieved, "cached_at": time.monotonic()}
+            _LIVE_CACHE.move_to_end(key)
+            while len(_LIVE_CACHE) > _LIVE_CACHE_MAX_ENTRIES:
+                _LIVE_CACHE.popitem(last=False)
     return {"manifest": {"turbine_id": site["turbine_id"], "run_id": "live-" + digest[:16],
-        "provider": "Open-Meteo Forecast / best_match", "source_url": LIVE_URL,
+        "provider": "Open-Meteo Forecast / ecmwf_ifs", "source_url": LIVE_URL,
         "initialized_at": None, "available_at": retrieved, "retrieved_at": retrieved,
+        "weather_cache_hit": cache_hit,
         "availability_basis": "live_http_retrieval", "provenance_status": "live",
         "raw_sha256": digest, "interpolation": "none", "wind_height_m": 10,
-        "wind_height_status": "proxy_not_hub_height", "grid_latitude": grid_lat,
+        "temperature_height_m": 2, "weather_model": "ecmwf_ifs",
+        "wind_height_status": "provider_feature_not_sensor_measurement", "grid_latitude": grid_lat,
         "grid_longitude": grid_lon}, "rows": rows}

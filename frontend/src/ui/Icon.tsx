@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 
-type Name = 'arrow' | 'back' | 'close' | 'globe' | 'play' | 'pause' | 'settings' | 'chart' | 'wind' | 'temperature' | 'download' | 'send' | 'check' | 'chevron' | 'sun' | 'info' | 'refresh'
+type Name = 'arrow' | 'back' | 'close' | 'globe' | 'play' | 'pause' | 'settings' | 'chart' | 'chat' | 'wind' | 'temperature' | 'download' | 'send' | 'check' | 'chevron' | 'sun' | 'info' | 'refresh'
 
 const paths: Record<Name, React.ReactNode> = {
   arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
@@ -11,6 +11,7 @@ const paths: Record<Name, React.ReactNode> = {
   pause: <><path d="M8 5v14M16 5v14" strokeWidth="3" /></>,
   settings: <><path d="M4 7h9m4 0h3M4 17h3m4 0h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
   chart: <><path d="M4 4v16h16M7 14l4-5 4 3 5-7" /></>,
+  chat: <><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 2v-5.5A7.5 7.5 0 0 1 4 7.5 7.5 7.5 0 0 1 20 11.5Z" /><path d="M8 10h8M8 14h5" /></>,
   wind: <><path d="M3 8h12a3 3 0 1 0-3-3M3 12h16a3 3 0 1 1-3 3M3 16h6a2 2 0 1 1-2 2" /></>,
   temperature: <><path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0Z" /><path d="M12 8v9" /></>,
   download: <><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4" /></>,

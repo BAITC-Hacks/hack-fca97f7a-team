@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import explanation
-from explanation import answer_question, summarize_forecast
+from backend.adapters import explanation
+from backend.adapters.explanation import answer_question, summarize_forecast
 
 
 def success_result():
@@ -54,6 +54,24 @@ def test_archive_wind_height_limitation_is_from_provided_warning_only():
     assert "соответствие датчику обучения" in summarize_forecast(result)["text"]
     result["analysis"]["warnings"] = []
     assert "высоте 10 м" not in summarize_forecast(result)["text"]
+
+
+def test_experimental_weather_model_is_disclosed_in_summary_and_answers():
+    result = hourly_result()
+    result["weather_provenance"]["provenance_status"] = "live"
+    result["model_provenance"] = {
+        "profile": "open_meteo_forecast", "training_weather_kind": "retrospective_stitched_forecast",
+        "forecast_accuracy_verified": False, "weather_model": "ecmwf_ifs", "wind_height_m": 10,
+    }
+    for text in (
+        summarize_forecast(result)["text"],
+        answer_question(result, "В какие шесть часов средняя мощность максимальна?", backend="template")["text"],
+        answer_question(result, "Что с ветром?", backend="template")["text"],
+    ):
+        assert "экспериментальная" in text
+        assert "ретроспективно полученные" in text
+        assert "ecmwf_ifs" in text
+        assert "не подтверждена" in text
 
 
 def test_missing_key_is_labeled_russian_fallback(monkeypatch):
@@ -156,7 +174,26 @@ def test_llm_uses_russian_computed_facts_and_versioned_cache(monkeypatch):
     answer_question(result, "В какие шесть часов средняя мощность максимальна?", backend="llm")
     answer_question(result, "Когда средняя мощность минимальна за шесть часов?", backend="llm")
     assert len(calls) == 4
-    assert "forecast-explanation-ru-v3" == explanation._PROMPT_VERSION
+    assert "forecast-explanation-ru-v4" == explanation._PROMPT_VERSION
+
+
+def test_llm_context_includes_model_provenance(monkeypatch):
+    explanation._CACHE.clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
+    calls = []
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(status="completed", output_text="Прогноз экспериментальный; точность на горизонте не подтверждена.")
+    monkeypatch.setattr(explanation, "_create_client", lambda: SimpleNamespace(
+        responses=SimpleNamespace(create=create), close=lambda: None))
+    result = hourly_result()
+    result["model_provenance"] = {
+        "profile": "open_meteo_forecast", "training_weather_kind": "retrospective_stitched_forecast",
+        "forecast_accuracy_verified": False, "weather_model": "ecmwf_ifs", "wind_height_m": 10,
+    }
+    answer_question(result, "Когда максимум?", backend="llm")
+    assert json.loads(calls[0]["input"])["model_provenance"] == result["model_provenance"]
+    assert "forecast_accuracy_verified=false" in calls[0]["instructions"]
 
 
 def test_llm_can_answer_other_forecast_questions_from_stored_hours(monkeypatch):
@@ -188,7 +225,7 @@ def test_llm_failure_preserves_computed_facts_without_exception_details(monkeypa
 
 def test_english_llm_response_uses_russian_fallback(monkeypatch):
     from types import SimpleNamespace
-    import explanation
+    from backend.adapters import explanation
     explanation._CACHE.clear()
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
     monkeypatch.setattr(explanation, "_create_client", lambda: SimpleNamespace(

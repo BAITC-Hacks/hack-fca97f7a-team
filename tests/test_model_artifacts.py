@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from contracts import ForecastError
-from model import load_model, predict_power, predict_with_diagnostics, save_model, train_model
+from backend.core.contracts import ForecastError
+from backend.ml.model import load_model, predict_power, predict_with_diagnostics, save_model, train_model
 
 
 def history() -> pd.DataFrame:
@@ -112,9 +112,9 @@ def test_registry_load_by_turbine_and_legacy_compatibility(tmp_path, monkeypatch
 
 
 def test_csv_inference_preserves_raw_values_for_agent_clipping(tmp_path, monkeypatch):
-    from contracts import FIRST_ORIGIN, expected_hours
-    from model_input import write_model_input
-    from model import predict_power_csv
+    from backend.core.contracts import FIRST_ORIGIN, expected_hours
+    from backend.ml.model_input import write_model_input
+    from backend.ml.model import predict_power_csv
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
     bundle = train_model(history(), FIRST_ORIGIN, "T1")
     rows = [{"valid_at": stamp, "wind_speed_ms": 6., "temperature_c": -2.}

@@ -36,12 +36,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
-export function getSites(mode: 'fixture' | 'archive' | 'live', signal?: AbortSignal): Promise<Site[]> {
-  return request<{ sites: Site[] }>(`/sites?mode=${encodeURIComponent(mode)}`, { signal }).then((body) => body.sites)
+export function getSites(signal?: AbortSignal): Promise<Site[]> {
+  return request<{ sites: Site[] }>('/sites?mode=live', { signal }).then((body) => body.sites)
 }
 
 export function createForecast(input: ForecastRequest, signal?: AbortSignal): Promise<ForecastResult> {
   return request<ForecastResult>('/forecasts', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input), signal })
+}
+
+export function getForecast(id: string, signal?: AbortSignal): Promise<ForecastResult> {
+  return request<ForecastResult>(`/forecasts/${encodeURIComponent(id)}`, { signal })
+}
+
+export function refreshWeather(turbineId: string, signal?: AbortSignal): Promise<{ status: 'ok' }> {
+  return request<{ status: 'ok' }>('/weather/refresh', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ turbine_id: turbineId }), signal })
 }
 
 export function explainForecast(id: string, signal?: AbortSignal): Promise<Explanation> {

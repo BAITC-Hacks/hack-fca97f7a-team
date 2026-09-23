@@ -17,7 +17,7 @@ export default function Sheet({ open, title, subtitle, onClose, children, classN
     function key(event: KeyboardEvent) {
       if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); return }
       if (event.key !== 'Tab') return
-      const focusable = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]') || []).filter(element => element.offsetParent !== null)
+      const focusable = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]') || []).filter(element => element.getClientRects().length > 0)
       if (!focusable.length) return
       const first = focusable[0], last = focusable[focusable.length - 1]
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }

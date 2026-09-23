@@ -10,13 +10,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 FIRST_ORIGIN = "2026-01-31T18:00:00Z"
 SITE_TIMEZONE = "Asia/Almaty"
 FEATURES = ["wind_speed_ms", "temperature_c"]
 SITE_IDS = ("T1", "T2")
 CSV_FIELDS = ["turbine_id", "origin", "valid_at", "lead_hour", "power_norm",
-              "baseline_norm", "run_id", "model_id", "mode", "provenance_status"]
+              "run_id", "model_id", "mode", "provenance_status"]
 
 
 class ForecastRequest(TypedDict):
@@ -112,7 +112,7 @@ def forecast_csv(result: dict) -> str:
     writer.writeheader()
     for hour in result["hours"]:
         row = {key: result[key] for key in ("turbine_id", "origin", "run_id", "model_id", "mode")}
-        row.update({key: hour[key] for key in ("valid_at", "lead_hour", "power_norm", "baseline_norm")})
+        row.update({key: hour[key] for key in ("valid_at", "lead_hour", "power_norm")})
         row["provenance_status"] = result["weather_provenance"]["provenance_status"]
         writer.writerow(row)
     return output.getvalue()

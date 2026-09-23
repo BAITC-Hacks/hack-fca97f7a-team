@@ -5,7 +5,7 @@ interface rather than making every module understand a new provider/model.
 
 ```text
 React (frontend/src/App.tsx)
-  → frontend/src/api.ts → FastAPI (api.py)
+  → frontend/src/api.ts → FastAPI (backend/api.py)
     → agent.run_forecast(request)
       → weather.fetch_weather(site, origin, horizon, mode)
       → validate historical availability + coverage
@@ -19,14 +19,15 @@ React (frontend/src/App.tsx)
 
 ## HTTP boundary — A owns backend, C owns frontend
 
-Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
+Backend: `backend/api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 `frontend/src/types.ts`. OpenAPI is served at `/docs` and `/openapi.json`.
 
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
-| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
+| `GET /api/sites?mode=live` | mode: live (UI); fixture/archive (internal) | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
+| `GET /api/forecasts/{id}` | stored forecast ID | checked stored result; no weather/model/LLM calls |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
 | `POST /api/forecasts/{id}/explanation` | `{"backend":"llm"}` (or template) | explanation below |
@@ -55,7 +56,7 @@ Success includes `status=ok`, those request fields, `timezone`, `run_id`,
 }
 ```
 
-Each hour is `{valid_at,lead_hour,wind_speed_ms,temperature_c,power_norm,baseline_norm}`.
+Each hour is `{valid_at,lead_hour,wind_speed_ms,temperature_c,power_norm}`.
 Analysis contains `peak_power_norm`, `peak_at`, `min_power_norm`, `min_at`,
 `clipped_count`, and `warnings`. Output is normalized power, not MW/MWh.
 
@@ -68,10 +69,11 @@ Errors use HTTP 400/422/503/404/500 as appropriate and
 `{status:"error",code,message,trace:[]}`. Unexpected tool/program failures
 return `INTERNAL_ERROR` (HTTP 500) with a generic Russian message; malformed
 weather/CSV data remains `DATA_INVALID` (HTTP 422). Forecasts are held in a bounded in-memory
-store (64 results). Restart or eviction means the ID returns 404; regenerate the
-forecast. This is intentionally a single-worker local demo, not distributed storage.
+store (64 results) backed by atomic, checksummed JSON in artifacts/forecasts.
+Restart/eviction restores a validated record. Disk retention: newest 256 files,
+maximum seven days. Missing/expired/corrupt records return 404; regenerate. This is intentionally a single-worker local demo, not distributed storage.
 
-## Weather seam — A owns `weather.py`
+## Weather seam — A owns `backend/adapters/weather.py`
 
 ```python
 load_sites(mode: str = "fixture") -> list[dict]
@@ -104,8 +106,9 @@ included in the existing forecast cache identity through the site metadata.
 The archive adapter requests `single-runs-api.open-meteo.com/v1/forecast`,
 `models=ecmwf_ifs`, one immutable UTC `run`, hourly `temperature_2m` and
 `wind_speed_10m`, m/s, °C, UTC timezone (API reports GMT or UTC with zero
-UTC offset). 10 m wind is **only a proxy** for unknown historical sensor/hub
-height, not proven model-feature parity. Grid latitude/longitude can differ from
+UTC offset). 10 m wind is a provider feature; sensor/hub height remains unknown.
+The provider model is trained on this weather source rather than assuming parity
+with SCADA wind. Grid latitude/longitude can differ from
 requested turbine coordinates and are recorded in `weather_provenance`.
 `interpolation=none` means the adapter does not interpolate; it does **not**
 claim native provider hourly or vertical resolution. All target hours
@@ -150,7 +153,7 @@ manufacture checksums/evidence from today's historical query and call it
 as-issued. Test malformed values, missing hours, wrong turbine and future
 publication times. Historical weather/reanalysis/stitched runs are not substitutes.
 
-## CSV seam — B owns `model_input.py`
+## CSV seam — B owns `backend/ml/model_input.py`
 
 ```python
 write_model_input(rows, turbine_id, origin, horizon_hours) -> dict
@@ -177,11 +180,11 @@ If adding model features, increment schema version and update the writer, reader
 model training feature list, weather normalization, DTO metadata and relevant
 contract tests together. Do not silently rename columns or change units.
 
-## Model seam — B owns `model.py` and `data.py`
+## Model seam — B owns `backend/ml/model.py` and `backend/ml/data.py`
 
 ```python
 train_model(history, origin, turbine_id) -> PowerModel
-load_model(turbine_id) -> PowerModel
+load_model(turbine_id, *, profile="measured") -> PowerModel
 predict_power_csv(model, csv_path, *, turbine_id, origin,
                   horizon_hours, expected_sha256) -> list[float]
 ```
@@ -191,7 +194,7 @@ last completed training interval and frozen persistence baseline. The agent
 requires matching turbine and a training cutoff no later than the first origin.
 Locally generated versioned model artifacts also record the source and canonical
 data hashes, feature order and units, fit parameters and environment versions.
-`load_model(turbine_id)` remains the public loader and checks the selected turbine;
+`load_model(turbine_id)` remains the measured-profile loader and checks the selected turbine;
 regenerate artifacts through `python -m scripts.train --mode fixture` after
 changing ingestion or features. See [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md)
 for measured-source audits and unconfirmed weather feature provenance.
@@ -204,7 +207,7 @@ via `python -m scripts.train --mode fixture`. Preserve output alignment and meta
 CSV interface. Models are fitted once from separately identified turbine datasets,
 not during HTTP requests or React renders.
 
-## Orchestration seam — A owns `agent.py`
+## Orchestration seam — A owns `backend/services/agent.py`
 
 `run_forecast(request, *, weather_tool=..., model_loader=...) -> dict` stays free
 of FastAPI, Streamlit and React. It validates requests, calls tools, writes CSV,
@@ -214,10 +217,10 @@ Cache identity includes request, site, model identity, weather content/provenanc
 and CSV schema/checksum. Weather is revalidated and the CSV is ensured present
 before cached predictions are returned. Retrieval wall time is not content identity.
 
-Keep error mapping and transport in `api.py`. Keep numeric analysis in the core;
+Keep error mapping and transport in `backend/api.py`. Keep numeric analysis in the core;
 LLM prose must not overwrite predictions, uncertainty, or provenance.
 
-## Explanation seam — C owns `explanation.py`
+## Explanation seam — C owns `backend/adapters/explanation.py`
 
 ```python
 summarize_forecast(result, backend="template") -> dict
@@ -253,7 +256,7 @@ Commit compatible increments and coordinate shared schema changes across A/B/C.
 
 ## Versioned model artifacts
 
-`load_model(turbine_id)` remains the orchestration boundary. Training writes
+`load_model(turbine_id, *, profile="measured")` is the loading boundary. Default training writes
 `artifacts/models/<turbine>/<model-hash>/model.pkl` and `metadata.json`, then
 updates `latest.json`. Loading verifies estimator identity, checksum, feature
 units/order and Python/scikit-learn compatibility. Trusted legacy per-turbine
@@ -267,15 +270,86 @@ retains ownership of clipping/counts. The independent diagnostic helper may clip
 `mode=live` is supported by HTTP, core and React, and is the UI default.
 The server replaces request origin with its current UTC hour; output remains
 origin+1h through origin+24/48h. Historical dates are not used in this mode.
-`weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
-coordinates, best_match, wind_speed_10m and temperature_2m, m/s, °C, UTC,
+`backend/adapters/weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
+coordinates, fixed `models=ecmwf_ifs`, wind_speed_10m and temperature_2m, m/s, °C, UTC,
 three forecast days. Exact hourly coverage/units/finite values are validated
 using the same parser as archive. Raw bytes and SHA-256 are saved before CSV inference.
 There is no synthetic fallback on provider failure.
 
 Live provenance is `live`, `availability_basis=live_http_retrieval`, and
 `retrieved_at=available_at` records actual retrieval. `initialized_at=null`: the
-provider run initialization is unknown, not fabricated. Live retrieval must occur
-within the current origin hour; archive retains its stricter as-issued chronology.
-Weather wind height is a 10 m proxy, model training remains frozen, and baseline
-is the last training observation rather than a current persistence forecast.
+provider run initialization is unknown, not fabricated. Live retrieval must be no more than five minutes old and not in the future;
+cache reuse across an hour boundary still requires full target coverage; archive retains its stricter as-issued chronology.
+Weather wind height is 10 m. It is used as a provider feature, not interpreted as
+the unknown turbine sensor/hub height. Model training remains frozen. Baseline values are only for internal model
+evaluation and are absent from user-facing hours, CSV and explanation inputs.
+
+## Provider-compatible power model
+
+`fixture` selects `profile=measured`; `live` and verified `archive` select
+`profile=open_meteo_ecmwf_ifs_10m`. There is no fallback between model profiles.
+Provider artifacts live under `artifacts/models/open_meteo_ecmwf_ifs_10m/` with
+their own `latest.json`. The profile, fixed recipe and weather context (provider,
+model, feature heights, historical source kind and verified CSV digest) are part
+of the model identity. The agent checks profile/model/heights before inference.
+The canonical input CSV remains `weather-features-v1`: raw m/s and °C features,
+same two columns and order, no numerical height correction in the adapter.
+
+`python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31`
+creates a checked raw cache and `training_weather.csv`/`manifest.json` under
+`artifacts/training_weather/`. This is Historical Forecast API with fixed ECMWF
+IFS, a retrospective stitched series whose origin availability is **UNVERIFIED**.
+It is training/diagnostic data, never valid runtime archive evidence.
+`load_training_weather` rechecks source/request/site/grid/unit/coverage identities
+and raw/CSV hashes. `python -m scripts.train_forecast --activate` joins weather to
+power by turbine and UTC hour, selects a recipe on September–October 2025, checks
+November–January, and refits through the frozen cutoff only if gates pass.
+Missing complete-hour labels are counted and excluded, never filled.
+
+Successful real-weather results add `model_provenance` with `profile`,
+`training_weather_kind=retrospective_stitched_forecast`,
+`forecast_accuracy_verified=false`, `weather_model=ecmwf_ifs`, `wind_height_m=10`.
+Weather provenance adds `weather_model` and `temperature_height_m=2`;
+`wind_height_status=provider_feature_not_sensor_measurement`. Model metadata
+contains training feature ranges; out-of-range inference hours generate a warning.
+UI and explanations retain the explicit experimental-model limitation.
+This improves source compatibility, not proof of 24/48-hour forecast skill.
+The verified Single Runs manifest/digest/availability gate remains mandatory.
+
+## Weather cache and persistent forecasts
+
+Live HTTP responses use a bounded eight-entry cache with a 300-second TTL, keyed
+by turbine, coordinates, URL and provider parameters. Coverage and raw artifact
+integrity are rechecked on reuse. `weather_cache_hit` is a boolean in provenance;
+`retrieved_at` retains actual original retrieval time. Volatile live retrieval
+fields are excluded from numeric forecast identity; archive provenance is retained.
+A UTC-hour boundary before/during/after retrieval triggers one refreshed-origin
+retry. A second crossing returns structured WEATHER_UNAVAILABLE.
+
+`POST /api/weather/refresh` accepts `{"turbine_id":"T1"}` (or T2), clears that
+turbine's cache, and returns `{"status":"ok"}`. React then regenerates the
+forecast using the normal request/epoch flow.
+
+Completed API results are saved as version-1 JSON envelopes with a SHA-256 content
+digest. Downloads/explanations restore after memory eviction or restart, subject
+to disk retention. Inputs remain server-owned; corrupt JSON, wrong identity,
+invalid coverage or checksum mismatches are rejected. Legacy baseline fields
+are stripped before response/explanation. No database or distributed workers.
+
+## Conditional February replay (internal CLI only)
+
+`backend/adapters/replay_weather.py` stores individual dated ECMWF IFS responses.
+The CLI explicitly opts in using `--weather-source provider-documented`; HTTP
+archive and default replay retain the strict verified gate. This path returns
+`provenance_status=provider_documented`, `available_at=null`,
+`availability_verified=false`, `assumed_available_by=run+24h` (an assumption).
+The selected run is previous-day 00 UTC for origin 18 UTC, age42h. Agent accepts
+this only with `allow_documented_archive=True`, preserving the caveat in output.
+No publication time or external attestation is manufactured. See docs/february-replay.md.
+
+React retains only the last live forecast ID in localStorage. On reload it uses
+GET to reopen checked server data and labels it saved, with original retrieval time.
+It does not auto-call explanation on restore. Missing/expired IDs return404 and
+are cleared; explicit refresh regenerates real weather and prediction.
+
+Model registries now write paths relative to latest.json (T1/hash). The loader retains legacy absolute/repository-relative compatibility and requires the resolved turbine directory. scripts/package_replay.py verifies and exports a portable February bundle without secrets or training CSVs.

@@ -13,6 +13,7 @@ async function loadTypeScript(relative) {
 }
 const { weatherForHour, windSpeedToRotorSpeed, solarPosition, WeatherInterpolator } = await loadTypeScript('./weather.ts')
 const { earthPoint, surfaceFrame, ScalarSpring, sphericalDirection, EARTH_RADIUS } = await loadTypeScript('../scene/geography.ts')
+const { windVisualProfile } = await loadTypeScript('../scene/wind.ts')
 const site = { turbine_id: 'T1', latitude: 43.645150, longitude: 78.535604, timezone: 'Asia/Almaty', coordinate_status: 'user_provided' }
 const hour = { valid_at: '2026-09-23T07:00:00Z', lead_hour: 1, wind_speed_ms: 0, temperature_c: 0, power_norm: 0, baseline_norm: 0 }
 
@@ -44,6 +45,31 @@ test('rotor curve has cut-in, bounded nonlinear response, telemetry priority, an
   assert.equal(windSpeedToRotorSpeed(12, 0), 0)
   assert.ok(Math.abs(windSpeedToRotorSpeed(0, 6) - Math.PI / 5) < 1e-12)
   assert.notEqual(speeds[2] - speeds[1], speeds[3] - speeds[2])
+})
+
+test('airflow distinguishes actual wind speeds, stays off in calm/reduced motion, and caps rendering budgets', () => {
+  for (const wind of [undefined, null, NaN, Infinity, -4, 0, 2]) {
+    const flow = windVisualProfile(wind)
+    assert.equal(flow.ribbons, 0)
+    assert.equal(flow.particles, 0)
+    assert.equal(flow.strength, 0)
+  }
+  const gentle = windVisualProfile(4.75), breeze = windVisualProfile(6), strong = windVisualProfile(10)
+  assert.ok(gentle.ribbons > 0 && gentle.opacity > 0.2)
+  for (const field of ['strength', 'ribbons', 'particles', 'length', 'width', 'opacity']) {
+    assert.ok(gentle[field] < breeze[field] && breeze[field] < strong[field], field)
+  }
+  const capped = windVisualProfile(1000)
+  assert.equal(capped.speed, 22)
+  assert.ok(capped.ribbons <= 24 && capped.particles <= 192)
+  const medium = windVisualProfile(22, false, 'medium')
+  assert.ok(medium.ribbons <= 16 && medium.particles <= 104)
+  for (const flow of [windVisualProfile(10, true), windVisualProfile(10, false, 'low')]) {
+    assert.equal(flow.ribbons, 0)
+    assert.equal(flow.particles, 0)
+    assert.equal(flow.opacity, 0)
+  }
+  assert.equal(windVisualProfile(10, true).strength, 0)
 })
 
 test('weather interpolation preserves rotor inertia and takes the short azimuth path', () => {

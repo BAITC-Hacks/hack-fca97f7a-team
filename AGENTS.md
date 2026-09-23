@@ -1,3 +1,9 @@
+> Current scope: finish missing jury requirements while keeping the UI live-only.
+> February CLI may explicitly use provider-documented Single Runs with inferred
+> availability, clearly labelled and never promoted to verified as-issued evidence.
+> Keep the default strict archive gate; internal conditional replay requires an
+> explicit opt-in and available_at=null. See docs/february-replay.md.
+
 # Working agreement
 
 ## Current task and source of truth
@@ -5,7 +11,7 @@
 The active application is **React + FastAPI**. The user explicitly authorized
 this migration, real weather-to-CSV-to-model inference, and an OpenAI explanation
 adapter. Earlier instructions deferring React/FastAPI/LLM implementation are
-superseded. `app.py` is only the legacy Streamlit prototype.
+superseded. `legacy/app.py` is only the legacy Streamlit prototype.
 
 Read [CONTRACTS.md](CONTRACTS.md) before changing a module boundary. README is the
 launch/handoff guide; PLAN.md is the current scope. The latest user instruction
@@ -19,13 +25,13 @@ the three developers, with ownership, priorities and acceptance criteria.
 ## Required flow and boundaries
 
 1. React selects a registered turbine and submits an explicit forecast origin.
-2. `api.py` validates HTTP bodies and calls `agent.run_forecast`.
-3. `weather.py` normalizes provider output into hourly wind m/s and temperature °C.
-4. `model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
+2. `backend/api.py` validates HTTP bodies and calls `agent.run_forecast`.
+3. `backend/adapters/weather.py` normalizes provider output into hourly wind m/s and temperature °C.
+4. `backend/ml/model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
 5. `model.predict_power_csv` reads and validates that exact file before inference.
 6. The agent returns numeric predictions, statistics, provenance and actual trace.
 7. React shows the result and requests an explanation by server-stored forecast ID.
-8. `explanation.py` calls OpenAI with generated forecast facts, or returns an
+8. `backend/adapters/explanation.py` calls OpenAI with generated forecast facts, or returns an
    explicitly labeled computed fallback. Questions use the same stored result.
 
 No UI/framework imports in core modules. No weather or inference logic in React.
@@ -47,12 +53,16 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
   UTC-aware and hourly; never use today's date implicitly for historical replay.
 - Weather initialization ≤ availability ≤ origin; verify every forecast hour,
   turbine identity and finite units before inference or cache reuse.
-- Archive mode requires verified as-issued forecasts. Never replace them silently
+- Default archive mode requires verified as-issued forecasts. The explicit internal
+  provider-documented replay uses a separate conditional provenance status and never
+  claims verified publication times. Never replace forecasts silently
   with fixtures, reanalysis, actual weather or retrospectively generated hindcasts.
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.
 
-Weather remains synthetic and must be labeled. Coordinates for T1/T2 were supplied
+Fixture weather remains synthetic and must be labeled. Live uses real ECMWF IFS
+forecasts and a separate provider-trained model; see FORECASTING_REPORT.md for
+the retrospective training protocol and its unverified 24/48-hour skill. Coordinates for T1/T2 were supplied
 and mapped by the user through Google Maps; retain `coordinate_status=user_provided`
 and the source links (see CONTRACTS.md). OpenAI is a real adapter; missing
 keys/failure must be labeled fallback.
@@ -69,9 +79,9 @@ coordinate shared contracts and preserve concurrent edits.
 
 | Stream | Owns | Change here |
 |---|---|---|
-| A — integration/weather | api.py, agent.py, weather.py, contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |
-| B — data/model | data.py, model_input.py, model.py, scripts/train.py, corresponding tests | CSV feature schema, ingestion, predictor, replay |
-| C — frontend/explanation | frontend/, explanation.py, summary tests | UI, central API client/types, grounded prose/questions |
+| A — integration/weather | backend/api.py, backend/services/agent.py, backend/adapters/weather.py, backend/core/contracts.py, fixture generator, config, dependency coordination | API routes, orchestration, real archive provider |
+| B — data/model | backend/ml/data.py, backend/ml/model_input.py, backend/ml/model.py, scripts/train.py, corresponding tests | CSV feature schema, ingestion, predictor, replay |
+| C — frontend/explanation | frontend/, backend/adapters/explanation.py, summary tests | UI, central API client/types, grounded prose/questions |
 
 Read CONTRACTS.md for signatures, DTOs, CSV version and change instructions.
 Coordinate shared contract changes with affected owners; prefer additive fields.
@@ -81,7 +91,8 @@ Train through CLI, not in requests. Load only locally generated model artifacts.
 Keep HTTP errors structured. Never return provider exception details or keys.
 Clear stale result/analysis/question state when input changes. Reject client-supplied
 predictions in explanation requests; use server-stored forecast IDs. In-memory
-stores are bounded; a restart/eviction returns 404 and the client regenerates.
+stores are bounded; restart/eviction restores checked JSON from artifacts/forecasts.
+Disk retention is 256 files / seven days; missing/expired/corrupt records return 404.
 
 ## Development
 
@@ -91,11 +102,11 @@ Python 3.12+ (verified 3.14.4), Node 22+. From repo root:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m scripts.make_fixtures
-python -m scripts.train --mode fixture
+python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
+python -m scripts.train_forecast --activate
 npm --prefix frontend ci
 npm --prefix frontend run build
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
 ```
 
 FastAPI serves the built React app at http://localhost:8000 and docs at /docs.
@@ -123,6 +134,23 @@ ones and list remaining stubs accurately.
 ## Live weather mode
 
 User explicitly requested actual current weather. React defaults to `live`;
-server chooses the current UTC hour and fetches Open-Meteo Forecast without
+server chooses the current UTC hour and fetches fixed ECMWF IFS from Open-Meteo Forecast without
 archive evidence. Preserve separate fixture/archive semantics. Live provenance
 records retrieval time, not an invented initialization/publication time.
+
+Real-weather inference uses `open_meteo_ecmwf_ifs_10m` model profile; fixture uses
+`measured`. Never silently fall back across profiles. Retrospective Historical
+Forecast training cache is not an archive attestation. Preserve CSV raw feature
+semantics and the explicit experimental/accuracy-unverified labels.
+
+## Demo resilience and handoff
+
+Live HTTP payloads are cached for five minutes (maximum eight entries). Show the
+original retrieved_at and weather_cache_hit; POST /api/weather/refresh clears the
+selected turbine before an explicit refresh. A UTC-hour crossing retries once,
+then fails clearly. Preserve archive chronology. No baseline in user forecasts,
+CSV or explanation inputs; evaluation baselines remain internal.
+
+Follow TEAM_WORKFLOW.md for branch integration and DEMO_CHECKLIST.md for browser
+checks. scripts/replay.py writes a full forecast.csv only when
+all 56 verified archive runs succeed; never mark partial/fixture replay complete.
