@@ -137,7 +137,9 @@ FastAPI TestClient needs local socket permissions in restricted environments.
 
 One explicitly user-approved live test succeeded with `gpt-5.4-mini`: 24 generated
 T2 weather rows → real CSV inference → LLM explanation, with no fallback. No raw
-training CSV was sent. Subsequent browser tests use an empty key.
+training CSV was sent. The React browser smoke test used an empty key and passed forecast rendering,
+48-row model-input CSV download, a six-hour-window question, next-day comparison,
+and the JavaScript error check (none).
 
 ## Remaining work
 
