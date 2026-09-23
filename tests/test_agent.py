@@ -96,3 +96,21 @@ def test_model_cutoff_and_archive(predictions):
     archive = agent.run_forecast(request(mode="archive"), model_loader=model_loader)
     assert archive["code"] == "WEATHER_UNAVAILABLE"
     assert predictions == []
+
+
+def test_documented_weather_requires_explicit_internal_opt_in():
+    from backend.adapters.weather import load_sites
+    from backend.core.contracts import ForecastError
+    bundle = deepcopy(fetch_weather(load_sites()[0], FIRST_ORIGIN, 24, 'fixture'))
+    bundle['manifest'].update(provenance_status='provider_documented',
+        initialized_at='2026-01-30T00:00:00Z', available_at=None,
+        assumed_available_by='2026-01-31T00:00:00Z', availability_verified=False,
+        availability_basis='provider_documented_conservative_24h')
+    req = request(mode='archive')
+    with pytest.raises(ForecastError):
+        agent._validated_weather(bundle, req, load_sites()[0])
+    manifest, rows = agent._validated_weather(bundle, req, load_sites()[0], allow_documented_archive=True)
+    assert len(rows) == 24 and manifest['available_at'] is None
+    bundle['manifest']['assumed_available_by'] = '2026-02-01T00:00:00Z'
+    with pytest.raises(ForecastError):
+        agent._validated_weather(bundle, req, load_sites()[0], allow_documented_archive=True)

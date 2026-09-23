@@ -42,3 +42,44 @@ def test_duplicate_hour_and_unverified_archive_fail_closed(tmp_path):
     report = run_replay(tmp_path, days=1, forecast=bad)
     assert report['actual_rows'] == 0 and len(report['failures']) == 2
     assert all(item['code'] == 'REPLAY_INVALID' for item in report['failures'])
+
+
+def documented_result(request):
+    output = result(request)
+    output['weather_provenance'] = {
+        'provenance_status': 'provider_documented',
+        'initialized_at': '2026-01-30T00:00:00Z',
+        'available_at': None,
+        'assumed_available_by': '2026-01-31T00:00:00Z',
+        'availability_verified': False,
+        'availability_basis': 'provider_documented_conservative_24h',
+    }
+    return output
+
+
+def test_documented_replay_complete_but_never_certified(tmp_path):
+    (tmp_path / 'forecast.csv').write_text('stale verified output')
+    report = run_replay(tmp_path, weather_source='provider-documented', forecast=documented_result)
+    assert report['status'] == 'ok' and report['complete_forecast_coverage']
+    assert report['actual_rows'] == 2688 and report['completed_runs'] == 56
+    assert report['daily_rows'] == 1344
+    import csv
+    daily = list(csv.DictReader((tmp_path / report['daily_output_file']).open()))
+    assert len({(row['turbine_id'], row['valid_at']) for row in daily}) == 1344
+    assert min(row['valid_at'] for row in daily) == '2026-01-31T19:00:00Z'
+    assert max(row['valid_at'] for row in daily) == '2026-02-28T18:00:00Z'
+    assert not report['historical_availability_verified'] and not report['full_february_replay']
+    assert report['output_file'] == 'documented_forecast.csv'
+    assert not (tmp_path / 'forecast.csv').exists()
+    assert 'provider_documented' in (tmp_path / report['output_file']).read_text()
+
+
+def test_documented_replay_requires_opt_in_and_rejects_fake_verification(tmp_path):
+    strict = run_replay(tmp_path, days=1, forecast=documented_result)
+    assert strict['actual_rows'] == 0
+    def forged(request):
+        output = documented_result(request)
+        output['weather_provenance']['availability_verified'] = True
+        return output
+    report = run_replay(tmp_path, days=1, weather_source='provider-documented', forecast=forged)
+    assert report['actual_rows'] == 0 and len(report['failures']) == 2

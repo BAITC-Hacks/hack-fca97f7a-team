@@ -18,19 +18,23 @@ _MAX_CACHE = 64
 _CACHE_LOCK = RLock()
 
 
-def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, list[dict]]:
+def _validated_weather(bundle: dict, request: dict, site: dict, *, allow_documented_archive: bool = False) -> tuple[dict, list[dict]]:
     if not isinstance(bundle, dict) or not isinstance(bundle.get("manifest"), dict) or not isinstance(bundle.get("rows"), list):
         raise ForecastError("DATA_INVALID", "Погодные данные имеют неверный формат; повторите запрос.")
     manifest, rows = bundle["manifest"], bundle["rows"]
+    documented = (request["mode"] == "archive" and allow_documented_archive
+                  and manifest.get("provenance_status") == "provider_documented")
     required = ("turbine_id", "run_id", "provider", "source_url", "initialized_at",
                 "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")
     if request["mode"] == "live":
         required = tuple(key for key in required if key != "initialized_at")
+    if documented:
+        required = tuple(key for key in required if key != "available_at") + ("assumed_available_by",)
     if any(not manifest.get(key) for key in required):
         raise ForecastError("DATA_INVALID", "Не хватает сведений о происхождении погодного прогноза.")
     if manifest["turbine_id"] != site["turbine_id"]:
         raise ForecastError("DATA_INVALID", "Погодный прогноз относится к другой турбине.")
-    if request["mode"] == "archive" and manifest["provenance_status"] != "verified":
+    if request["mode"] == "archive" and manifest["provenance_status"] != "verified" and not documented:
         raise ForecastError("WEATHER_UNAVAILABLE", "Для архива нужен проверенный прогноз на момент выпуска.")
     if request["mode"] == "fixture" and manifest["provenance_status"] != "fixture":
         raise ForecastError("DATA_INVALID", "Для демонстрационного режима нужны помеченные синтетические данные.")
@@ -47,7 +51,15 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
             raise ForecastError("LIVE_ORIGIN_CHANGED", "Во время обработки погоды начался новый час UTC; прогноз будет обновлён.")
     else:
         initialized = utc_time(manifest["initialized_at"])
-        available = utc_time(manifest["available_at"])
+        if documented:
+            available = utc_time(manifest["assumed_available_by"])
+            if (manifest.get("available_at") is not None
+                    or manifest.get("availability_verified") is not False
+                    or manifest["availability_basis"] != "provider_documented_conservative_24h"
+                    or available != initialized + timedelta(hours=24)):
+                raise ForecastError("DATA_INVALID", "Допущение о доступности архивного выпуска указано неверно.")
+        else:
+            available = utc_time(manifest["available_at"])
         if initialized > available:
             raise ForecastError("DATA_INVALID", "Время выпуска прогноза позже времени его доступности.")
         if available > utc_time(request["origin"]):
@@ -77,7 +89,8 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
     return manifest, normalized
 
 
-def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None) -> dict:
+def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None,
+                 allow_documented_archive: bool = False) -> dict:
     trace: list[dict] = []
     try:
         request = validate_request(request)
@@ -93,7 +106,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         for attempt in (1, 2):
             try:
                 bundle = weather_tool(site, request["origin"], request["horizon_hours"], request["mode"])
-                manifest, rows = _validated_weather(bundle, request, site)
+                manifest, rows = _validated_weather(bundle, request, site, allow_documented_archive=allow_documented_archive)
                 break
             except ForecastError as exc:
                 if exc.code != "LIVE_ORIGIN_CHANGED" or request["mode"] != "live":
@@ -139,7 +152,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
         identity_provenance = ({key: value for key, value in provenance.items()
                                 if key not in ("retrieved_at", "available_at", "weather_cache_hit")}
                                if request["mode"] == "live" else provenance)
@@ -170,6 +183,8 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         minimum = min(hours, key=lambda hour: hour["power_norm"])
         warnings = (["Реальные данные обучения турбины; синтетическая погода"] if request["mode"] == "fixture"
                     else ["Экспериментальная модель обучена на архиве погоды Open-Meteo; точность прогноза на 24/48 ч пока не подтверждена."])
+        if manifest["provenance_status"] == "provider_documented":
+            warnings.append("Историческая доступность выпуска предполагается по правилу задержки 24 ч; точное время публикации и as-issued происхождение не подтверждены для каждого выпуска.")
         if request["mode"] == "live":
             warnings.append("Текущий прогноз погоды; модель обучена до февраля 2026 года")
         warnings.append("Временная зона и начало интервала исходных данных требуют подтверждения")
