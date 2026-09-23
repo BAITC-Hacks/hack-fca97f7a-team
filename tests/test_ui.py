@@ -74,4 +74,4 @@ def test_summary_stub_keeps_real_forecast(ui, monkeypatch):
     assert not ui.exception
     assert ui.session_state["result"]["status"] == "ok"
     assert ui.session_state["summary"]["backend"] == "template"
-    assert "not enabled" in ui.session_state["summary"]["warning"]
+    assert "not configured" in ui.session_state["summary"]["warning"]
