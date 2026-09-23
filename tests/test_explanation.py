@@ -41,8 +41,18 @@ def test_summary_and_missing_key_are_russian(monkeypatch):
     summary = summarize_forecast(forecast(), backend="llm")
     assert summary["backend"] == "template"
     assert "0,82" in summary["text"] and "0,07" in summary["text"]
-    assert "синтетические" in summary["text"]
+    assert summary["text"].startswith("**Прогноз нормализованной мощности**\n\n- **Пик:")
+    assert "01.02.2026 00:00" in summary["text"]
+    assert "синтетическая" in " ".join(summary["notes"])
+    assert "синтетическая" not in summary["text"]
     assert "Ключ OpenAI не настроен" in summary["warning"]
+
+
+def test_intentional_template_has_notes_without_provider_warning():
+    answer = summarize_forecast(forecast(), backend="template")
+    assert answer["warning"] is None
+    assert answer["notes"]
+    assert answer["text"].count("\n- **") == 2
 
 
 def test_summary_discloses_timezone_and_wind_limitation():
@@ -50,10 +60,12 @@ def test_summary_discloses_timezone_and_wind_limitation():
     result["weather_provenance"]["provenance_status"] = "verified_as_issued"
     result["analysis"]["warnings"] = ["Временная зона и начало интервала исходных данных требуют подтверждения",
                                       "Ветер на высоте 10 м — приближение"]
-    text = summarize_forecast(result)["text"]
-    assert "границы интервалов приняты по допущению" in text
-    assert "соответствие датчику обучения" in text
-    assert "синтетические" not in text
+    answer = summarize_forecast(result)
+    notes = " ".join(answer["notes"])
+    assert "границы исходных интервалов приняты по допущению" in notes
+    assert "соответствие датчику обучения" in notes
+    assert "синтетическая" not in notes
+    assert "допущению" not in answer["text"]
 
 
 def test_experimental_weather_model_is_disclosed_in_summary_and_answers():
@@ -66,13 +78,15 @@ def test_experimental_weather_model_is_disclosed_in_summary_and_answers():
     }
     result["model_context"].update({"profile": "open_meteo_ecmwf_ifs_10m",
                                      "training_source": "supplied turbine measurements"})
-    for text in (summarize_forecast(result)["text"],
-                 answer_question(result, "Лучшие четыре часа подряд", backend="template")["text"],
-                 answer_question(result, "На каких данных обучена модель?", backend="template")["text"]):
-        assert "экспериментальная" in text
-        assert "ретроспективно полученные" in text
-        assert "ecmwf_ifs" in text
-        assert "не подтверждена" in text
+    for answer in (summarize_forecast(result),
+                   answer_question(result, "Лучшие четыре часа подряд", backend="template"),
+                   answer_question(result, "На каких данных обучена модель?", backend="template")):
+        notes = " ".join(answer["notes"])
+        assert "экспериментальная" in notes
+        assert "ретроспективно полученные" in notes
+        assert "ecmwf_ifs" in notes
+        assert "не подтверждена" in notes
+        assert "экспериментальная" not in answer["text"]
 
 
 def test_experimental_model_facts_reach_llm_context(monkeypatch):
@@ -87,8 +101,9 @@ def test_experimental_model_facts_reach_llm_context(monkeypatch):
     assert answer["backend"] == "llm"
     context = json.loads(calls[0]["input"][0]["content"])
     assert context["model_provenance"] == result["model_provenance"]
-    assert "forecast_accuracy_verified=false" in calls[0]["instructions"]
-    assert "ретроспективно полученные" in answer["text"]
+    assert "notes_ru" in calls[0]["instructions"]
+    assert "ретроспективно полученные" in " ".join(answer["notes"])
+    assert json.loads(calls[0]["input"][0]["content"])["notes_ru"] == answer["notes"]
 
 
 def test_validation_is_russian():
@@ -152,7 +167,7 @@ def test_model_context_available_in_offline_answer():
     answer = answer_question(result, "На каких данных обучена модель?", backend="template")
     assert "исторические данные T1" in answer["text"]
     assert "2026-01-31T18:00:00Z" in answer["text"]
-    assert "не доказывает физическую причину" in answer["text"]
+    assert "не подтверждено" not in answer["text"]
     assert "10 м" not in answer["text"]
 
 
@@ -190,6 +205,8 @@ def test_llm_calls_python_tool_and_returns_selection(monkeypatch):
     context = json.loads(calls[0]["input"][0]["content"])
     assert context["model_context"]["features"] == ["wind_speed_ms", "temperature_c"]
     assert "source_csv" not in calls[0]["input"][0]["content"]
+    assert context["notes_ru"] == answer["notes"]
+    assert "синтетическая" not in answer["text"]
     assert calls[1]["input"][-1]["call_id"] == "call-1"
     assert json.loads(calls[1]["input"][-1]["output"])["data"]["mean_power_norm"] == pytest.approx(21.5 / 24)
 
@@ -241,7 +258,9 @@ def test_cache_includes_history_and_selection(monkeypatch):
     question = "Что означает нормализованная мощность?"
     first = answer_question(forecast(), question)
     first["text"] = "испорчено"
+    first["notes"].clear()
     assert answer_question(forecast(), question)["text"].startswith("Первый ответ.")
+    assert answer_question(forecast(), question)["notes"]
     assert answer_question(forecast(), question, history=[{"role": "user", "content": "раньше"}])["text"].startswith("Второй ответ.")
     selection = {"start": "2026-01-31T19:00:00Z", "end": "2026-01-31T20:00:00Z"}
     assert answer_question(forecast(), question, selection=selection)["text"].startswith("Третий ответ.")
@@ -272,6 +291,8 @@ def test_failure_after_tool_preserves_computed_facts(monkeypatch):
     assert answer["backend"] == "template"
     assert answer["selection"]["start"] == "2026-02-01T15:00:00Z"
     assert "0,896" in answer["text"]
+    assert "синтетическая" in " ".join(answer["notes"])
+    assert "синтетическая" not in answer["text"]
     assert "provider secret" not in answer["warning"]
 
 

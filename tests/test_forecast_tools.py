@@ -27,10 +27,13 @@ def test_best_contiguous_and_followups_use_exact_selected_period():
     assert first["tool"] == "best_hours"
     assert first["selection"] == {"start": "2026-02-01T02:00:00Z", "end": "2026-02-01T06:00:00Z"}
     assert first["data"]["mean_power_norm"] == pytest.approx(0.6)
+    assert "[0,1].\n\nПериод:" in first["text"]
     wind = local_question(forecast, "А какой там ветер?", first["selection"])
     assert wind["tool"] == "period_details"
     assert wind["data"]["mean_wind_speed_ms"] == pytest.approx(5.5)
     assert len(wind["table"]["rows"]) == 4
+    assert wind["table"]["rows"][0][0] == "01.02.2026 07:00 · UTC+05:00"
+    assert "м/с.\n\nПериод" in wind["text"]
     comparison = local_question(forecast, "Сравни с последующими четырьмя часами", first["selection"])
     assert comparison["tool"] == "compare_periods"
     assert comparison["data"]["second"]["start"] == first["selection"]["end"]
@@ -71,7 +74,39 @@ def test_period_average_and_explicit_comparison():
         "comparison_start": "2026-02-01T02:00:00Z", "comparison_end": "2026-02-01T04:00:00Z"})
     assert comparison["data"]["second"]["mean_power_norm"] == pytest.approx(0.85)
     assert "| ---" not in comparison["text"]
-    assert "Первый период" in comparison["text"] and "Второй" in comparison["text"]
+    assert "Во втором периоде" in comparison["text"] and "Первый:" in comparison["text"]
+    assert ".\n\nПервый:" in comparison["text"] and ".\n\nВторой:" in comparison["text"]
+
+
+def test_compact_local_period_does_not_repeat_date_or_timezone():
+    answer = execute_tool(result(), "average_power", {
+        "start": "2026-02-01T00:00:00Z", "end": "2026-02-01T02:00:00Z"})
+    assert "01.02.2026, 05:00–07:00 · UTC+05:00 (Asia/Almaty)" in answer["text"]
+    assert "[0,1].\n\nПериод" in answer["text"]
+    assert answer["text"].count("01.02.2026") == 1
+    assert answer["selection"] == {"start": "2026-02-01T00:00:00Z", "end": "2026-02-01T02:00:00Z"}
+    assert answer["data"]["mean_power_norm"] == pytest.approx(0.15)
+
+
+def test_cross_midnight_period_shows_both_dates_once():
+    forecast = result((0.2, 0.4))
+    start = datetime(2026, 2, 1, 18, tzinfo=timezone.utc)
+    for index, hour in enumerate(forecast["hours"]):
+        hour["valid_at"] = (start + timedelta(hours=index)).isoformat().replace("+00:00", "Z")
+    answer = execute_tool(forecast, "average_power", {
+        "start": "2026-02-01T18:00:00Z", "end": "2026-02-01T20:00:00Z"})
+    assert "01.02.2026 23:00 – 02.02.2026 01:00 · UTC+05:00 (Asia/Almaty)" in answer["text"]
+
+
+def test_daylight_saving_change_shows_both_offsets():
+    forecast = result((0.2, 0.4))
+    forecast["timezone"] = "Europe/Berlin"
+    start = datetime(2026, 10, 25, 0, tzinfo=timezone.utc)
+    for index, hour in enumerate(forecast["hours"]):
+        hour["valid_at"] = (start + timedelta(hours=index)).isoformat().replace("+00:00", "Z")
+    answer = execute_tool(forecast, "average_power", {
+        "start": "2026-10-25T00:00:00Z", "end": "2026-10-25T02:00:00Z"})
+    assert "UTC+02:00 → UTC+01:00 (Europe/Berlin)" in answer["text"]
 
 
 def test_power_changes_are_only_between_adjacent_hours():

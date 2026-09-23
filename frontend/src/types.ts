@@ -92,6 +92,7 @@ export interface Explanation {
   forecast_fingerprint: string
   warning: string | null
   model?: string
+  notes?: string[]
 }
 
 export interface TimeSelection {

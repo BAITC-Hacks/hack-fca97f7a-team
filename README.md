@@ -65,12 +65,21 @@ DATA_MODE=fixture
 
 The current workspace already has the supplied key in ignored `.env` with
 owner-only permissions. Environment variables take precedence over `.env`.
+An explicitly empty `OPENAI_API_KEY` in the launch environment also overrides the
+file; remove that override and restart the backend after changing `.env`.
+`GET /api/health` reports `llm_configured` without calling OpenAI or exposing the key.
 Never place keys in React, `VITE_` variables, Git or prompts. No NVIDIA adapter is
 needed for this slice.
 
 The backend uses the OpenAI Responses API with an 8-second timeout per call and no automatic
 retries. Questions allow at most three API calls and four Python tool calls. Numeric forecasts appear first. Missing key, timeout or provider failure
 returns a labeled local answer; it does not discard or change the forecast.
+Assistant messages render paragraphs, emphasis, lists and tables. Model/data
+limitations appear separately under «Ограничения прогноза», while provider failures
+remain explicitly labeled next to the response.
+Formatting was checked on desktop and mobile with mocked API responses; the
+Python suite passes 203 tests. The startup key check uses `/api/health` only and
+does not validate account access or make a paid OpenAI request.
 
 ## Демонстрация за 2–3 минуты
 

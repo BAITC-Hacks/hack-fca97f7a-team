@@ -38,7 +38,7 @@ export const ru = {
   analysis: '03 / АНАЛИЗ', analysisTitle: 'Анализ и чат', aiExplanation: 'Объяснение ИИ', computedExplanation: 'Расчётное объяснение — ИИ недоступен',
   explanationLoading: 'Готовим объяснение…', explanationUnavailable: 'Не удалось получить объяснение',
   askLabel: 'Вопрос по этому прогнозу', askPlaceholder: 'Найди лучшие четыре часа подряд', asking: 'Ищем ответ…', ask: 'Задать вопрос', answer: 'ОТВЕТ', ai: 'ИИ', computed: 'Расчётный ответ',
-  calculationTable: 'Расчёт по данным прогноза', newConversation: 'Предыдущий диалог больше не доступен. Вопрос сохранён: отправьте его снова, чтобы начать новый диалог.',
+  calculationTable: 'Расчёт по данным прогноза', limitations: 'Ограничения прогноза', newConversation: 'Предыдущий диалог больше не доступен. Вопрос сохранён: отправьте его снова, чтобы начать новый диалог.',
   comparison: 'Сравнение запусков', whatChanged: 'Что изменилось?', inspectOverlap: 'Посмотреть совпадающие часы',
   localHour: 'Местный час', previous: 'Ранее', current: 'Сейчас', change: 'Изменение',
   hourlyData: 'Почасовые данные', lead: 'Шаг', wind: 'Ветер, м/с', temperature: 'Температура, °C', power: 'Мощность',

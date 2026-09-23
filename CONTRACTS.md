@@ -72,10 +72,17 @@ are not exposed. This context participates in the forecast fingerprint.
 Analysis contains `peak_power_norm`, `peak_at`, `min_power_norm`, `min_at`,
 `clipped_count`, and `warnings`. Output is normalized power, not MW/MWh.
 
-Explanation/answer: `{text,backend,forecast_fingerprint,warning,model?}`.
+Explanation/answer: `{text,backend,forecast_fingerprint,warning,model?,notes?}`.
 `backend=llm` means an actual OpenAI response; fallback is always `template`
 with a reason. React renders numeric output before requesting the explanation.
 It must check the explanation fingerprint and ignore responses from stale inputs.
+`text` supports safe Markdown paragraphs, emphasis, lists and tables; raw HTML and
+images are not rendered. `notes` is a list of plain Russian limitations (synthetic
+weather, time assumptions, wind height and unverified model skill), displayed
+separately from the answer. `warning` describes an unavailable provider or missing
+key, not model limitations. Computed tables remain structured `tool_results`.
+Readable period labels shorten repeated dates/timezones without changing raw UTC
+selection bounds, units or calculated values.
 
 Question responses additionally contain `conversation_id`, `selection` (a UTC
 half-open `{start,end}` period or null) and `tool_results`. Each tool result has

@@ -4,6 +4,7 @@ import type { Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site
 import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail, weatherProviderLabel } from './ru'
 import PowerChart from './PowerChart'
 import SiteMap from './SiteMap'
+import AssistantText from './AssistantText'
 import { saveBlob } from './chartExport'
 
 const FIRST_DATE = '2026-01-31'
@@ -40,15 +41,13 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
 }
 
 function AnswerContent({ answer }: { answer: QuestionAnswer }) {
-  return <>
-    <p className="prose">{answer.text}</p>
+  return <AssistantText answer={answer}>
     {answer.tool_results?.filter(result => result.table && result.table.columns.length > 0).map((result, index) => <div className="table-scroll chat-table" key={`${result.tool}-${index}`}>
       <table><caption>{ru.calculationTable}</caption><thead><tr>{result.table!.columns.map((column, i) => <th scope="col" key={i}>{column}</th>)}</tr></thead>
         <tbody>{result.table!.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody>
       </table>
     </div>)}
-    {answer.warning && <p className="message-warning">{answer.warning}</p>}
-  </>
+  </AssistantText>
 }
 
 export default function App() {
@@ -231,11 +230,11 @@ export default function App() {
             <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
               <div className="chat-message assistant-message">
                 <span className="message-author">{ru.analysisAuthor}</span>
-                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
+                {explanation ? <AssistantText answer={explanation} /> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
               </div>
               {conversation.map((exchange, index) => <div className="chat-exchange" key={index}>
                 <div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{exchange.question}</p></div>
-                <div className="chat-message assistant-message"><span className="message-author">{exchange.answer.backend === 'llm' ? ru.aiExplanation : ru.computed}</span><AnswerContent answer={exchange.answer} /></div>
+                <div className="chat-message assistant-message"><span className="message-author">{ru.analysisAuthor}</span><AnswerContent answer={exchange.answer} /></div>
               </div>)}
               {pendingQuestion && <><div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{pendingQuestion}</p></div><p className="muted loading-status" role="status">{ru.asking}</p></>}
             </div>

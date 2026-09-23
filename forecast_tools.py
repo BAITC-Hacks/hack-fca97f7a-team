@@ -79,6 +79,12 @@ def _local(value: datetime, zone: ZoneInfo) -> str:
     return f"{local:%d.%m.%Y %H:%M} UTC{offset[:3]}:{offset[3:]} ({zone.key})"
 
 
+def _table_time(value: datetime, zone: ZoneInfo) -> str:
+    local = value.astimezone(zone)
+    offset = local.strftime("%z")
+    return f"{local:%d.%m.%Y %H:%M} · UTC{offset[:3]}:{offset[3:]}"
+
+
 def _hours(result: dict) -> list[dict]:
     if not isinstance(result, dict) or result.get("status") != "ok" or not isinstance(result.get("hours"), list) or not result["hours"]:
         raise ValueError("Нужен сохранённый прогноз с почасовыми данными.")
@@ -138,7 +144,19 @@ def _row_data(row: dict) -> dict:
 
 
 def _period_label(period: dict, zone: ZoneInfo) -> str:
-    return f"{_local(_stamp(period['start']), zone)} — {_local(_stamp(period['end']), zone)}"
+    start = _stamp(period["start"]).astimezone(zone)
+    end = _stamp(period["end"]).astimezone(zone)
+    start_offset, end_offset = start.strftime("%z"), end.strftime("%z")
+    if start.date() == end.date():
+        dates = f"{start:%d.%m.%Y}, {start:%H:%M}–{end:%H:%M}"
+    else:
+        dates = f"{start:%d.%m.%Y %H:%M} – {end:%d.%m.%Y %H:%M}"
+    if start_offset == end_offset:
+        offset = f"UTC{start_offset[:3]}:{start_offset[3:]}"
+    else:
+        offset = (f"UTC{start_offset[:3]}:{start_offset[3:]} → "
+                  f"UTC{end_offset[:3]}:{end_offset[3:]}")
+    return f"{dates} · {offset} ({zone.key})"
 
 
 def execute_tool(result: dict, name: str, args: dict, selection: dict | None = None) -> dict:
@@ -165,11 +183,15 @@ def execute_tool(result: dict, name: str, args: dict, selection: dict | None = N
             means = _means(group)
             return {"tool": name, "data": {"count": count, "contiguous": True, "order": order, **period, **means},
                     "selection": period,
-                    "text": f"{'Лучшие' if order == 'best' else 'Худшие'} {count} часа подряд: {_period_label(period, zone)}. Средняя нормализованная мощность — {_number(means['mean_power_norm'])}; ветер — {_number(means['mean_wind_speed_ms'], 2)} м/с, температура — {_number(means['mean_temperature_c'], 2)} °C."}
+                    "text": (f"{'Лучший' if order == 'best' else 'Худший'} непрерывный период ({count} ч): "
+                             f"средняя мощность {_number(means['mean_power_norm'])} [0,1].\n\n"
+                             f"Период: {_period_label(period, zone)}.\n\n"
+                             f"Средний ветер: {_number(means['mean_wind_speed_ms'], 2)} м/с; "
+                             f"температура: {_number(means['mean_temperature_c'], 2)} °C.")}
         ranked = sorted(rows, key=lambda row: ((-1 if order == "best" else 1) * row["power_norm"], row["at"]))[:count]
         single_selection = _selection(ranked[0]["at"], ranked[0]["at"] + _HOUR) if count == 1 else None
         table = {"columns": ["Час", "Мощность [0,1]", "Ветер, м/с", "Температура, °C"],
-                 "rows": [[_local(row["at"], zone), _number(row["power_norm"]), _number(row["wind_speed_ms"], 2), _number(row["temperature_c"], 2)] for row in ranked]}
+                 "rows": [[_table_time(row["at"], zone), _number(row["power_norm"]), _number(row["wind_speed_ms"], 2), _number(row["temperature_c"], 2)] for row in ranked]}
         return {"tool": name, "data": {"count": count, "contiguous": False, "order": order, "hours": [_row_data(row) for row in ranked]},
                 "selection": single_selection, "table": table,
                 "text": (f"{'Лучший' if order == 'best' else 'Худший'} час — {_local(ranked[0]['at'], zone)}; нормализованная мощность {_number(ranked[0]['power_norm'])}."
@@ -180,12 +202,16 @@ def execute_tool(result: dict, name: str, args: dict, selection: dict | None = N
         data = {**period, "count": len(group), **means}
         if name == "average_power":
             return {"tool": name, "data": data, "selection": period,
-                    "text": f"Средняя нормализованная мощность за {len(group)} ч ({_period_label(period, zone)}) — {_number(means['mean_power_norm'])}."}
+                    "text": (f"Средняя нормализованная мощность: {_number(means['mean_power_norm'])} [0,1].\n\n"
+                             f"Период ({len(group)} ч): {_period_label(period, zone)}.")}
         data["hours"] = [_row_data(row) for row in group]
         table = {"columns": ["Час", "Ветер, м/с", "Температура, °C", "Мощность [0,1]"],
-                 "rows": [[_local(row["at"], zone), _number(row["wind_speed_ms"], 2), _number(row["temperature_c"], 2), _number(row["power_norm"])] for row in group]}
+                 "rows": [[_table_time(row["at"], zone), _number(row["wind_speed_ms"], 2), _number(row["temperature_c"], 2), _number(row["power_norm"])] for row in group]}
         return {"tool": name, "data": data, "selection": period, "table": table,
-                "text": f"За период {_period_label(period, zone)}: средний ветер — {_number(means['mean_wind_speed_ms'], 2)} м/с, температура — {_number(means['mean_temperature_c'], 2)} °C, нормализованная мощность — {_number(means['mean_power_norm'])}."}
+                "text": (f"Средний ветер: {_number(means['mean_wind_speed_ms'], 2)} м/с.\n\n"
+                         f"Период ({len(group)} ч): {_period_label(period, zone)}.\n\n"
+                         f"Средняя температура: {_number(means['mean_temperature_c'], 2)} °C; "
+                         f"нормализованная мощность: {_number(means['mean_power_norm'])} [0,1].")}
     if name == "compare_periods":
         first, first_period = _period(rows, args["start"], args["end"], selection)
         comparison_start, comparison_end = args["comparison_start"], args["comparison_end"]
@@ -196,9 +222,17 @@ def execute_tool(result: dict, name: str, args: dict, selection: dict | None = N
         a, b = _means(first), _means(second)
         table = {"columns": ["Период", "Часы", "Средняя мощность [0,1]", "Средний ветер, м/с", "Средняя температура, °C"],
                  "rows": [[_period_label(p, zone), str(len(group)), _number(means["mean_power_norm"]), _number(means["mean_wind_speed_ms"], 2), _number(means["mean_temperature_c"], 2)] for p, group, means in ((first_period, first, a), (second_period, second, b))]}
+        delta = b["mean_power_norm"] - a["mean_power_norm"]
+        if math.isclose(delta, 0.0, abs_tol=1e-12):
+            conclusion = "Средняя нормализованная мощность двух периодов одинакова."
+        else:
+            conclusion = (f"Во втором периоде средняя нормализованная мощность "
+                          f"{'выше' if delta > 0 else 'ниже'} на {_number(abs(delta))} [0,1].")
         return {"tool": name, "data": {"first": {**first_period, "count": len(first), **a}, "second": {**second_period, "count": len(second), **b}, "delta_mean_power_norm": b["mean_power_norm"] - a["mean_power_norm"]},
                 "selection": second_period, "table": table,
-                "text": f"Первый период ({_period_label(first_period, zone)}): средняя нормализованная мощность {_number(a['mean_power_norm'])}. Второй ({_period_label(second_period, zone)}): {_number(b['mean_power_norm'])}; разница с первым {_number(b['mean_power_norm'] - a['mean_power_norm'])}."}
+                "text": (f"{conclusion}\n\n"
+                         f"Первый: {_period_label(first_period, zone)} — {_number(a['mean_power_norm'])}.\n\n"
+                         f"Второй: {_period_label(second_period, zone)} — {_number(b['mean_power_norm'])}.")}
     threshold, direction = args["threshold"], args["direction"]
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1 or direction not in ("up", "down", "both"):
         raise ValueError("Укажите порог от 0 до 1 и направление изменения.")
@@ -213,7 +247,7 @@ def execute_tool(result: dict, name: str, args: dict, selection: dict | None = N
                             "wind_before_ms": previous["wind_speed_ms"], "wind_after_ms": current["wind_speed_ms"],
                             "temperature_before_c": previous["temperature_c"], "temperature_after_c": current["temperature_c"]})
     table = {"columns": ["Первый час", "Следующий час", "Мощность [0,1]", "Изменение мощности [0,1]", "Ветер, м/с", "Температура, °C"],
-             "rows": [[_local(_stamp(item["from"]), zone), _local(_stamp(item["to"]), zone),
+             "rows": [[_table_time(_stamp(item["from"]), zone), _table_time(_stamp(item["to"]), zone),
                        f"{_number(item['power_before_norm'])} → {_number(item['power_after_norm'])}", _number(item["delta_power_norm"]),
                        f"{_number(item['wind_before_ms'], 2)} → {_number(item['wind_after_ms'], 2)}",
                        f"{_number(item['temperature_before_c'], 2)} → {_number(item['temperature_after_c'], 2)}"] for item in changes]}
