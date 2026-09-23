@@ -23,7 +23,7 @@ export const ru = {
   registeredTurbine: 'ЗАРЕГИСТРИРОВАННАЯ ТУРБИНА', coordinates: 'Координаты пользователя',
   mapHint: 'Координаты из предоставленных ссылок Google Maps.',
   turbine: 'Турбина', chooseTurbine: 'Выберите турбину', originDate: 'Дата запуска', horizon: 'Горизонт', hours24: '24 часа', hours48: '48 часов',
-  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Настоящий прогноз Open-Meteo. Модель обучена на истории турбин; ветер 10 м — приближение. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
+  live: 'Настоящая погода · сейчас', liveTime: 'Начало — следующий полный час. Время определяется сервером.', liveNotice: 'Текущий прогноз Open-Meteo ECMWF IFS. Модель обучена на погоде этого источника и измеренной мощности. Точность на 24–48 часов пока не подтверждена. Мощность нормализована, не МВт.', weatherSource: 'Источник погоды', fixture: 'Демонстрационная погода', archive: 'Проверенный архив',
   calculating: 'Формируем прогноз…', predict: 'Сформировать прогноз',
   pipelineWeather: 'ПОГОДА', pipelineCsv: 'ВХОДНОЙ CSV', pipelineModel: 'МОДЕЛЬ', pipelineExplanation: 'ОБЪЯСНЕНИЕ',
   awaiting: 'ОЖИДАНИЕ ПРОГНОЗА', emptyTitle: 'Сформируйте первый прогноз', emptyText: 'Выберите турбину, дату и горизонт слева. Здесь появятся график мощности и основные показатели, ниже — анализ и чат.',
@@ -62,6 +62,10 @@ const fields: Record<string, string> = {
   initialized_at: 'Время выпуска', available_at: 'Время доступности', availability_basis: 'Основание доступности',
   retrieved_at: 'Время получения', provenance_status: 'Статус происхождения', raw_sha256: 'Контрольная сумма источника', interpolation: 'Интерполяция',
   coordinate_status: 'Статус координат',
+  weather_model: 'Погодная модель', wind_height_m: 'Высота ветра, м',
+  temperature_height_m: 'Высота температуры, м', wind_height_status: 'Смысл высоты ветра',
+  grid_latitude: 'Широта погодной сетки', grid_longitude: 'Долгота погодной сетки',
+  forecast_sha256: 'Контрольная сумма погодного прогноза',
 }
 export const fieldLabel = (key: string) => fields[key] || key.replaceAll('_', ' ')
 export const statusLabel = (status: string) => ({ ok: 'ГОТОВО', cached: 'ИЗ КЕША', retry: 'ПОВТОР', error: 'ОШИБКА' }[status] || status)
@@ -74,6 +78,8 @@ export const provenanceLabel = (value: string) => ({
   live: ru.live, fixture: ru.fixture, archive: ru.archive, synthetic: 'Условные', verified: 'Проверенные',
   'synthetic deterministic fixture': 'Детерминированная демонстрационная погода',
   'synthetic fixture schedule': 'Демонстрационное расписание', none: 'Нет',
+  provider_feature_not_sensor_measurement: 'Признак погодного провайдера; не измерение датчика турбины',
+  live_http_retrieval: 'Получено текущим запросом API', ecmwf_ifs: 'ECMWF IFS',
 }[value] || value)
 export const coordinateLabel = (value: string) => ({ user_provided: ru.coordinates, verified: 'Проверенные координаты', fixture: 'Условные координаты' }[value] || 'Источник координат не указан')
 export function provenanceValue(key: string, value: string, zone: string): string {

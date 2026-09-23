@@ -74,7 +74,7 @@ def _validated_weather(bundle: dict, request: dict, site: dict) -> tuple[dict, l
     return manifest, normalized
 
 
-def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load_model) -> dict:
+def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None) -> dict:
     trace: list[dict] = []
     try:
         request = validate_request(request)
@@ -103,8 +103,19 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         model_input = write_model_input(rows, request["turbine_id"], request["origin"], request["horizon_hours"])
         trace.append({"step": "write_model_input_csv", "status": "ok",
                       "detail": f"{model_input['row_count']} rows · {model_input['schema_version']} · {model_input['sha256']}"})
-        fitted = model_loader(request["turbine_id"])
+        profile = "measured" if request["mode"] == "fixture" else "open_meteo_ecmwf_ifs_10m"
+        fitted = (load_model(request["turbine_id"], profile=profile) if model_loader is None
+                  else model_loader(request["turbine_id"]))
         metadata = fitted.metadata
+        if request["mode"] != "fixture":
+            context = metadata.get("weather_context") or {}
+            if (metadata.get("profile") != profile or context.get("model") != "ecmwf_ifs"
+                    or manifest.get("weather_model") != context.get("model")
+                    or manifest.get("wind_height_m") != context.get("wind_height_m")
+                    or manifest.get("temperature_height_m") != context.get("temperature_height_m")):
+                raise ForecastError("MODEL_UNAVAILABLE", "Погодные признаки не соответствуют обученной модели.")
+        elif metadata.get("profile", "measured") != "measured":
+            raise ForecastError("MODEL_UNAVAILABLE", "Для демонстрационной погоды нужна демонстрационная модель.")
         if metadata.get("turbine_id") != request["turbine_id"] or not metadata.get("model_id"):
             raise ForecastError("MODEL_UNAVAILABLE", "Модель не соответствует выбранной турбине; проверьте артефакты обучения.")
         if utc_time(metadata["train_origin"]) > min(utc_time(request["origin"]), utc_time(FIRST_ORIGIN)):
@@ -119,7 +130,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("retrieved_at", "wind_height_m", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("retrieved_at", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256") if key in manifest})
         identity = fingerprint({"request": request, "site": site, "model_id": metadata["model_id"],
                                 "weather": {"manifest": provenance, "rows": rows}, "model_input": model_input})
         with _CACHE_LOCK:
@@ -145,10 +156,16 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
         peak = max(hours, key=lambda hour: hour["power_norm"])
         minimum = min(hours, key=lambda hour: hour["power_norm"])
         warnings = (["Реальные данные обучения турбины; синтетическая погода"] if request["mode"] == "fixture"
-                    else ["Ветер на высоте 10 м — приближение, не подтверждённое для датчика обучения и высоты ступицы"])
+                    else ["Экспериментальная модель обучена на архиве погоды Open-Meteo; точность прогноза на 24/48 ч пока не подтверждена."])
         if request["mode"] == "live":
             warnings.append("Текущий прогноз погоды; модель обучена до февраля 2026 года, baseline заморожен на момент обучения")
         warnings.append("Временная зона и начало интервала исходных данных требуют подтверждения")
+        distribution = metadata.get("feature_distribution", {})
+        outside = sum(any(name in distribution and
+                          not distribution[name]["min"] <= row[name] <= distribution[name]["max"]
+                          for name in FEATURES) for row in rows)
+        if outside:
+            warnings.append(f"За диапазоном обучающей погоды: {outside} ч; надёжность прогноза для них снижена.")
         if clipped_count:
             warnings.append(f"Ограничено до диапазона [0,1] прогнозов: {clipped_count}")
         analysis = {"peak_power_norm": peak["power_norm"], "peak_at": peak["valid_at"],
@@ -163,6 +180,10 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=load
                   "model_input": model_input,
                   "weather_provenance": provenance, "hours": hours, "analysis": analysis,
                   "trace": trace}
+        if request["mode"] != "fixture":
+            result["model_provenance"] = {"profile": profile,
+                "training_weather_kind": metadata["weather_context"]["training_weather_kind"],
+                "forecast_accuracy_verified": False, "weather_model": "ecmwf_ifs", "wind_height_m": 10}
         with _CACHE_LOCK:
             _CACHE[identity] = copy.deepcopy(result)
             if len(_CACHE) > _MAX_CACHE:

@@ -7,8 +7,12 @@ The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
-Both turbine models are trained from their separate real datasets. Weather is
-still a labeled fixture; map coordinates come from the user's Google Maps links.
+Both turbine models are trained from their separate real datasets. Live weather
+uses Open-Meteo ECMWF IFS and a separate model trained on that provider's historical
+forecast features. This model is experimental: the historical series stitches
+short leads and does not establish 24/48-hour forecast accuracy. Fixture mode
+keeps synthetic weather and the original measured-weather model. Coordinates come
+from the user's Google Maps links. See [forecast analysis](FORECASTING_REPORT.md).
 OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
@@ -23,6 +27,8 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 python -m scripts.make_fixtures
 python -m scripts.train --mode fixture
+python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31
+python -m scripts.train_forecast --activate
 npm --prefix frontend ci
 npm --prefix frontend run build
 python -m uvicorn api:app --host 127.0.0.1 --port 8000
@@ -38,6 +44,13 @@ npm --prefix frontend run dev
 ```
 
 Open http://localhost:5173; Vite proxies `/api` to FastAPI.
+
+The weather download is public and cached locally with source checksums. Subsequent
+runs reuse verified cache; `--cache-only` forbids network access. Provider training
+uses only completed hours through January 31, 2026 18:00 UTC and activates only
+after chronological improvement checks. Without its artifacts, live/archive
+return `MODEL_UNAVAILABLE`; fixture mode still works after the first training command.
+Numeric evaluation and per-hour errors are under `artifacts/forecast_evaluation/`.
 
 ## OpenAI configuration
 
@@ -63,11 +76,11 @@ returns a labeled local answer; it does not discard or change the forecast.
 
 Согласованный минималистичный дизайн описан в [frontend/DESIGN.md](frontend/DESIGN.md).
 
-1. Откройте приложение. Слева — карта с координатами пользователя и параметры, справа — прогноз, под ним — анализ и чат. Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty. Погода остаётся демонстрационной.
+1. Откройте приложение. Для реального текущего прогноза оставьте режим «Настоящая погода · сейчас», выберите T1 и 48 часов. Для воспроизводимого демо выберите «Демонстрационная погода» и дату 31.01.2026; только в этом режиме погода синтетическая.
 2. Нажмите **«Сформировать прогноз»**. Покажите график нормализованной мощности и раздел «Почасовые данные». Числовой результат появляется до объяснения.
 3. Нажмите **«Скачать прогноз CSV»** в панели результата. Под графиком доступны **PNG** (2200 × 840) и **SVG** с датой, турбиной, часовым поясом и легендой. В разделе **«Данные и метод расчёта»** нажмите **«Скачать входной CSV»** — это точный файл, прочитанный моделью.
 4. Покажите пометку «Объяснение ИИ» или «Расчётное объяснение — ИИ недоступен». Спросите: **«В какие шесть часов средняя мощность максимальна?»**. Шестичасовое среднее вычисляет сервер.
-5. Нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
+5. В демонстрационном режиме нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
 6. Для проверки ошибок выберите «Проверенный архив» и нажмите «Сформировать прогноз»: появится сообщение о недоступной погоде. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
 
 Сохранённая демонстрационная погода доступна только для 31 января и 1 февраля,
@@ -180,7 +193,7 @@ No JavaScript errors or paid OpenAI requests occurred.
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
-The current app is a working demo with explicit synthetic weather and user-supplied coordinates, not a
+The current app uses real live weather plus an explicit synthetic demo mode and user-supplied coordinates, not a
 claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.
 

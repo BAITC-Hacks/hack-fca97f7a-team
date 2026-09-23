@@ -39,6 +39,19 @@ export interface TraceStep {
   detail: string
 }
 
+export interface WeatherProvenance {
+  provenance_status: string
+  [key: string]: string | number | null
+}
+
+export interface ModelProvenance {
+  profile: string
+  training_weather_kind: string
+  forecast_accuracy_verified: boolean
+  weather_model: string
+  wind_height_m: number
+}
+
 export interface ForecastResult extends ForecastRequest {
   status: 'ok'
   forecast_id: string
@@ -49,7 +62,8 @@ export interface ForecastResult extends ForecastRequest {
   fingerprint: string
   cache_hit: boolean
   train_last_interval_start: string
-  weather_provenance: Record<string, string>
+  weather_provenance: WeatherProvenance
+  model_provenance?: ModelProvenance
   hours: ForecastHour[]
   analysis: {
     peak_power_norm: number

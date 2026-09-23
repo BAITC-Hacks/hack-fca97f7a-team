@@ -104,8 +104,9 @@ included in the existing forecast cache identity through the site metadata.
 The archive adapter requests `single-runs-api.open-meteo.com/v1/forecast`,
 `models=ecmwf_ifs`, one immutable UTC `run`, hourly `temperature_2m` and
 `wind_speed_10m`, m/s, °C, UTC timezone (API reports GMT or UTC with zero
-UTC offset). 10 m wind is **only a proxy** for unknown historical sensor/hub
-height, not proven model-feature parity. Grid latitude/longitude can differ from
+UTC offset). 10 m wind is a provider feature; sensor/hub height remains unknown.
+The provider model is trained on this weather source rather than assuming parity
+with SCADA wind. Grid latitude/longitude can differ from
 requested turbine coordinates and are recorded in `weather_provenance`.
 `interpolation=none` means the adapter does not interpolate; it does **not**
 claim native provider hourly or vertical resolution. All target hours
@@ -181,7 +182,7 @@ contract tests together. Do not silently rename columns or change units.
 
 ```python
 train_model(history, origin, turbine_id) -> PowerModel
-load_model(turbine_id) -> PowerModel
+load_model(turbine_id, *, profile="measured") -> PowerModel
 predict_power_csv(model, csv_path, *, turbine_id, origin,
                   horizon_hours, expected_sha256) -> list[float]
 ```
@@ -191,7 +192,7 @@ last completed training interval and frozen persistence baseline. The agent
 requires matching turbine and a training cutoff no later than the first origin.
 Locally generated versioned model artifacts also record the source and canonical
 data hashes, feature order and units, fit parameters and environment versions.
-`load_model(turbine_id)` remains the public loader and checks the selected turbine;
+`load_model(turbine_id)` remains the measured-profile loader and checks the selected turbine;
 regenerate artifacts through `python -m scripts.train --mode fixture` after
 changing ingestion or features. See [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md)
 for measured-source audits and unconfirmed weather feature provenance.
@@ -253,7 +254,7 @@ Commit compatible increments and coordinate shared schema changes across A/B/C.
 
 ## Versioned model artifacts
 
-`load_model(turbine_id)` remains the orchestration boundary. Training writes
+`load_model(turbine_id, *, profile="measured")` is the loading boundary. Default training writes
 `artifacts/models/<turbine>/<model-hash>/model.pkl` and `metadata.json`, then
 updates `latest.json`. Loading verifies estimator identity, checksum, feature
 units/order and Python/scikit-learn compatibility. Trusted legacy per-turbine
@@ -268,7 +269,7 @@ retains ownership of clipping/counts. The independent diagnostic helper may clip
 The server replaces request origin with its current UTC hour; output remains
 origin+1h through origin+24/48h. Historical dates are not used in this mode.
 `weather.py` fetches https://api.open-meteo.com/v1/forecast for the registered
-coordinates, best_match, wind_speed_10m and temperature_2m, m/s, °C, UTC,
+coordinates, fixed `models=ecmwf_ifs`, wind_speed_10m and temperature_2m, m/s, °C, UTC,
 three forecast days. Exact hourly coverage/units/finite values are validated
 using the same parser as archive. Raw bytes and SHA-256 are saved before CSV inference.
 There is no synthetic fallback on provider failure.
@@ -277,5 +278,38 @@ Live provenance is `live`, `availability_basis=live_http_retrieval`, and
 `retrieved_at=available_at` records actual retrieval. `initialized_at=null`: the
 provider run initialization is unknown, not fabricated. Live retrieval must occur
 within the current origin hour; archive retains its stricter as-issued chronology.
-Weather wind height is a 10 m proxy, model training remains frozen, and baseline
+Weather wind height is 10 m. It is used as a provider feature, not interpreted as
+the unknown turbine sensor/hub height. Model training remains frozen; baseline
 is the last training observation rather than a current persistence forecast.
+
+## Provider-compatible power model
+
+`fixture` selects `profile=measured`; `live` and verified `archive` select
+`profile=open_meteo_ecmwf_ifs_10m`. There is no fallback between model profiles.
+Provider artifacts live under `artifacts/models/open_meteo_ecmwf_ifs_10m/` with
+their own `latest.json`. The profile, fixed recipe and weather context (provider,
+model, feature heights, historical source kind and verified CSV digest) are part
+of the model identity. The agent checks profile/model/heights before inference.
+The canonical input CSV remains `weather-features-v1`: raw m/s and °C features,
+same two columns and order, no numerical height correction in the adapter.
+
+`python -m scripts.fetch_training_weather --start-date 2024-01-01 --end-date 2026-01-31`
+creates a checked raw cache and `training_weather.csv`/`manifest.json` under
+`artifacts/training_weather/`. This is Historical Forecast API with fixed ECMWF
+IFS, a retrospective stitched series whose origin availability is **UNVERIFIED**.
+It is training/diagnostic data, never valid runtime archive evidence.
+`load_training_weather` rechecks source/request/site/grid/unit/coverage identities
+and raw/CSV hashes. `python -m scripts.train_forecast --activate` joins weather to
+power by turbine and UTC hour, selects a recipe on September–October 2025, checks
+November–January, and refits through the frozen cutoff only if gates pass.
+Missing complete-hour labels are counted and excluded, never filled.
+
+Successful real-weather results add `model_provenance` with `profile`,
+`training_weather_kind=retrospective_stitched_forecast`,
+`forecast_accuracy_verified=false`, `weather_model=ecmwf_ifs`, `wind_height_m=10`.
+Weather provenance adds `weather_model` and `temperature_height_m=2`;
+`wind_height_status=provider_feature_not_sensor_measurement`. Model metadata
+contains training feature ranges; out-of-range inference hours generate a warning.
+UI and explanations retain the explicit experimental-model limitation.
+This improves source compatibility, not proof of 24/48-hour forecast skill.
+The verified Single Runs manifest/digest/availability gate remains mandatory.

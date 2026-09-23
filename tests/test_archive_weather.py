@@ -71,7 +71,7 @@ def test_archive_coverage(turbine, horizon, setup_archive):
     assert [row["valid_at"] for row in result["rows"]] == expected_hours(FIRST_ORIGIN, horizon)
     assert result["manifest"]["raw_sha256"] == hashlib.sha256(_bytes(data)).hexdigest()
     assert result["manifest"]["forecast_sha256"] == record["forecast_sha256"]
-    assert result["manifest"]["wind_height_status"] == "proxy_not_hub_height"
+    assert result["manifest"]["wind_height_status"] == "provider_feature_not_sensor_measurement"
     assert result["manifest"]["grid_latitude"] == 43.620384
     assert calls[0][1]["run"] == record["run"] and calls[0][1]["models"] == "ecmwf_ifs"
     assert "start_date" not in calls[0][1]
@@ -228,14 +228,11 @@ def test_provider_failures_sanitized(failure, setup_archive, monkeypatch):
     assert secret not in str(exc.value)
 
 
-def test_agent_real_csv_and_fitted_model(setup_archive, monkeypatch):
+def test_agent_real_csv_and_fitted_model(setup_archive, monkeypatch, provider_model_factory):
     site, data, record, calls, save = setup_archive
     agent._CACHE.clear()
     request = {"turbine_id": "T1", "origin": FIRST_ORIGIN, "horizon_hours": 24, "mode": "archive"}
-    from model import load_model
-    with monkeypatch.context() as model_environment:
-        model_environment.delenv("ARTIFACT_DIR", raising=False)
-        fitted = load_model("T1")
+    fitted = provider_model_factory("T1")
     result = agent.run_forecast(request, model_loader=lambda turbine: fitted)
     assert result["status"] == "ok", result
     assert result["model_input"]["row_count"] == 24

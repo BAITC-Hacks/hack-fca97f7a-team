@@ -134,7 +134,8 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
             "availability_basis": record["availability_basis"] + ":" + record["evidence_ref"],
             "provenance_status": "verified", "raw_sha256": digest,
             "forecast_sha256": canonical_digest, "interpolation": "none",
-            "wind_height_m": 10, "wind_height_status": "proxy_not_hub_height",
+            "wind_height_m": 10, "temperature_height_m": 2, "weather_model": "ecmwf_ifs",
+            "wind_height_status": "provider_feature_not_sensor_measurement",
             "grid_latitude": data.get("latitude"), "grid_longitude": data.get("longitude")}, "rows": rows}
 
 
@@ -239,7 +240,8 @@ def _live_weather(site: dict, origin: str, horizon_hours: int) -> dict:
         raise ForecastError("INVALID_INPUT", "Настоящий прогноз доступен от текущего часа; обновите запрос.")
     params = {"latitude": site["latitude"], "longitude": site["longitude"],
               "hourly": "temperature_2m,wind_speed_10m", "wind_speed_unit": "ms",
-              "temperature_unit": "celsius", "timezone": "UTC", "forecast_days": 3}
+              "temperature_unit": "celsius", "timezone": "UTC", "forecast_days": 3,
+              "models": "ecmwf_ifs"}
     try:
         response = httpx.get(LIVE_URL, params=params, timeout=15.0, follow_redirects=False)
         if response.status_code == 429:
@@ -257,9 +259,10 @@ def _live_weather(site: dict, origin: str, horizon_hours: int) -> dict:
     digest = hashlib.sha256(raw).hexdigest()
     _save_raw(raw, digest)
     return {"manifest": {"turbine_id": site["turbine_id"], "run_id": "live-" + digest[:16],
-        "provider": "Open-Meteo Forecast / best_match", "source_url": LIVE_URL,
+        "provider": "Open-Meteo Forecast / ecmwf_ifs", "source_url": LIVE_URL,
         "initialized_at": None, "available_at": retrieved, "retrieved_at": retrieved,
         "availability_basis": "live_http_retrieval", "provenance_status": "live",
         "raw_sha256": digest, "interpolation": "none", "wind_height_m": 10,
-        "wind_height_status": "proxy_not_hub_height", "grid_latitude": grid_lat,
+        "temperature_height_m": 2, "weather_model": "ecmwf_ifs",
+        "wind_height_status": "provider_feature_not_sensor_measurement", "grid_latitude": grid_lat,
         "grid_longitude": grid_lon}, "rows": rows}
