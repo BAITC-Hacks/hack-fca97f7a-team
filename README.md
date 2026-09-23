@@ -1,7 +1,7 @@
 # Wind power forecast — React + FastAPI
 
-Implementation backlog for three developers: [tasks.md](tasks.md). The demo must
-be fully in Russian; localization is tracked there as required remaining work.
+Implementation backlog for three developers: [tasks.md](tasks.md). The active
+React demo has a Russian user interface and Russian explanation fallback.
 
 The active application is a React frontend with a FastAPI backend:
 
@@ -58,19 +58,20 @@ The backend uses the OpenAI Responses API with an 8-second timeout and no automa
 retries. Numeric forecasts appear first. Missing key, timeout or provider failure
 returns a labeled local answer; it does not discard or change the forecast.
 
-## Demo
+## Демонстрация за 2–3 минуты
 
-1. Select T1/T2 on the map or selector. Keep January 31, 2026 and 48 hours.
-2. Click **Predict generation**. Inspect the power chart and hourly table.
-3. Click **Inspect model input CSV** to download the exact file the predictor read.
-4. Read the explanation; its label distinguishes OpenAI from computed fallback.
-5. Ask: **Which six-hour period has the highest average output?** The window is
-   calculated locally and supplied to the explanation model.
-6. Click **Advance one day & recalculate** to compare overlapping target hours.
+1. Откройте приложение и покажите плашку «Демонстрационная погода и условные координаты». Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty.
+2. Нажмите **«Сформировать прогноз»**. Покажите график нормализованной мощности и раздел «Почасовые данные». Числовой результат появляется до объяснения.
+3. Нажмите **«Скачать входной CSV»**. Это точный файл, прочитанный моделью. Кнопка **«Скачать прогноз CSV»** выгружает результат.
+4. Покажите пометку «Объяснение ИИ» или «Расчётное объяснение — ИИ недоступен». Спросите: **«В какие шесть часов средняя мощность максимальна?»**. Шестичасовое среднее вычисляет сервер.
+5. Нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
+6. Для проверки ошибок выберите «Проверенный архив»: появится сообщение о ненастроенных координатах. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
 
-Fixture weather exists only for January 31 and February 1 at 23:00 Asia/Almaty.
-Other origins return an explicit error. Archive mode reports unavailable until
-verified coordinates/weather are integrated. Input changes clear stale results.
+Сохранённая демонстрационная погода доступна только для 31 января и 1 февраля,
+23:00 Asia/Almaty. Карта загружает тайлы из сети; турбину всегда можно выбрать
+из списка. Режим архива заработает после подключения проверенных координат и
+погоды. Повторный запуск сервера удаляет сохранённые ID прогнозов; сформируйте
+прогноз заново.
 
 ## The module seams
 
@@ -132,7 +133,7 @@ python -m pytest -q
 npm --prefix frontend run build
 ```
 
-**41 Python tests pass** and the React TypeScript/Vite build passes. Tests cover
+The Python suite and React TypeScript/Vite build cover
 CSV consumption/integrity, chronology, source identities, input/output validation,
 cache, HTTP/downloads, stored forecast context, summary fallback and legacy UI.
 Tests clear OPENAI_API_KEY and mock SDK responses; they spend no API credits.
@@ -140,9 +141,11 @@ FastAPI TestClient needs local socket permissions in restricted environments.
 
 One explicitly user-approved live test succeeded with `gpt-5.4-mini`: 24 generated
 T2 weather rows → real CSV inference → LLM explanation, with no fallback. No raw
-training CSV was sent. The React browser smoke test used an empty key and passed forecast rendering,
-48-row model-input CSV download, a six-hour-window question, next-day comparison,
-and the JavaScript error check (none).
+training CSV was sent. An earlier React browser smoke test used an empty key and
+passed forecast rendering, 48-row model-input CSV download, a six-hour-window
+question, next-day comparison, and the JavaScript error check (none). The current
+Russian interface is verified by the build and Python explanation tests; a new
+browser rehearsal remains useful before presentation.
 
 ## Remaining work
 
