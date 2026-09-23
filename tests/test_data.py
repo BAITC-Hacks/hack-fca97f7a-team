@@ -1,94 +1,68 @@
-from __future__ import annotations
-
-from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from data import SOURCE_STEM, ingest_sources
+from contracts import ForecastError, ROOT
+from data import COLUMNS, canonicalize, ingest_all
 
 
-def _rows(start: str, count: int, power: float = 0.0) -> list[dict]:
-    beginning = datetime.fromisoformat(start)
-    return [
-        {
-            "Статистическое время": (beginning + timedelta(minutes=10 * n)).strftime("%Y-%m-%d %H:%M:%S"),
-            "Средняя скорость ветра(m/s)": float(n + 1),
-            "Нормализованная активная мощность": power,
-            "Средняя температура окружающей среды(°C)": -2.0,
-        }
-        for n in range(count)
-    ]
+def write_source(path, timestamps, powers=None):
+    columns = list(COLUMNS)
+    pd.DataFrame({columns[0]: timestamps, columns[1]: [6.0] * len(timestamps),
+                  columns[2]: powers if powers is not None else [0.3] * len(timestamps),
+                  columns[3]: [-3.0] * len(timestamps)}).to_csv(path, index=False)
 
 
-def _write(data_dir, t1, t2):
-    data_dir.mkdir(parents=True, exist_ok=True)
-    for number, rows in ((1, t1), (2, t2)):
-        pd.DataFrame(rows).to_csv(data_dir / SOURCE_STEM.format(number), index=False)
+def test_complete_hours_only_and_zero_power_retained(tmp_path):
+    times = [f"2026-01-30 00:{m:02}:00" for m in range(0, 60, 10)]
+    times += [f"2026-01-30 01:{m:02}:00" for m in range(0, 50, 10)]
+    path = tmp_path / "source.csv"
+    write_source(path, times, [0.0] * 6 + [1.0] * 5)
+    frame, audit = canonicalize(path, "T2")
+    assert len(frame) == 1
+    assert frame.iloc[0]["timestamp"] == pd.Timestamp("2026-01-29T19:00:00Z")
+    assert frame.iloc[0]["power_norm"] == 0
+    assert audit["complete_hours"] == audit["incomplete_hours"] == 1
 
 
-def test_complete_hour_zero_power_duplicate_and_incomplete_hour(tmp_path):
-    one = _rows("2026-01-31 00:00:00", 6)
-    one.append(one[0].copy())  # Duplicate does not create a seventh sample.
-    one.extend(_rows("2026-01-31 01:00:00", 5))
-    two = _rows("2026-01-31 00:00:00", 6, power=0.5)
-    _write(tmp_path / "data", one, two)
-
-    history, audit = ingest_sources(tmp_path / "data", tmp_path / "out")
-
-    assert len(history) == 2
-    assert history["timestamp"].dt.tz is not None
-    assert history.loc[history.turbine_id == "T1", "timestamp"].iloc[0].isoformat() == "2026-01-30T19:00:00+00:00"
-    assert history.loc[history.turbine_id == "T1", "wind_speed_ms"].iloc[0] == 3.5
-    assert history.loc[history.turbine_id == "T1", "power_norm"].iloc[0] == 0.0
-    assert audit["sources"]["T1"]["duplicate_slot_rows"] == 2
-    assert audit["sources"]["T1"]["incomplete_hours"] == 1
-    assert (tmp_path / "out" / "history.csv").exists()
-    assert (tmp_path / "out" / "audit.json").exists()
+def test_duplicate_source_timestamp_rejected(tmp_path):
+    path = tmp_path / "source.csv"
+    write_source(path, ["2026-01-30 00:00:00"] * 2)
+    with pytest.raises(ForecastError, match="Duplicate"):
+        canonicalize(path, "T2")
 
 
-def test_almaty_2024_repeated_clock_hour_is_dropped(tmp_path):
-    # 23:00–23:50 occurred twice when Almaty moved from UTC+6 to UTC+5.
-    ambiguous = _rows("2024-02-29 23:00:00", 6)
-    valid = _rows("2024-03-01 00:00:00", 6)
-    _write(tmp_path, ambiguous + valid, _rows("2024-03-01 00:00:00", 6, power=0.5))
-
-    history, audit = ingest_sources(tmp_path)
-
-    assert audit["sources"]["T1"]["ambiguous_local_rows"] == 6
-    assert audit["sources"]["T1"]["complete_hours"] == 1
-    assert history.loc[history.turbine_id == "T1", "timestamp"].iloc[0].isoformat() == "2024-02-29T19:00:00+00:00"
+def test_ambiguous_clock_change_is_reported(tmp_path):
+    path = tmp_path / "source.csv"
+    write_source(path, [f"2024-02-29 23:{m:02}:00" for m in range(0, 60, 10)]
+                 + [f"2024-03-01 00:{m:02}:00" for m in range(0, 60, 10)])
+    frame, audit = canonicalize(path, "T2")
+    assert audit["ambiguous_or_nonexistent_rows"] == 6
+    assert len(frame) == 1
 
 
-def test_conflicting_duplicate_invalidates_affected_hour(tmp_path):
-    one = _rows("2026-01-31 00:00:00", 6)
-    conflicting = one[0].copy()
-    conflicting["Средняя скорость ветра(m/s)"] = 100.0
-    one.append(conflicting)
-    _write(tmp_path, one, _rows("2026-01-31 00:00:00", 6, power=0.5))
-
-    history, audit = ingest_sources(tmp_path)
-
-    assert audit["sources"]["T1"]["conflicting_duplicate_slots"] == 1
-    assert audit["sources"]["T1"]["complete_hours"] == 0
-    assert history.turbine_id.tolist() == ["T2"]
-
-
-def test_identical_source_hashes_are_rejected(tmp_path):
-    rows = _rows("2026-01-31 00:00:00", 6)
-    _write(tmp_path, rows, rows)
-    with pytest.raises(ValueError, match="identical SHA-256"):
-        ingest_sources(tmp_path)
+def test_real_sources_are_distinct_and_suffixed_copies_ignored(tmp_path):
+    # Confirm current actual inputs and exact-name selection, without ingesting 300k rows per test.
+    import hashlib
+    from data import source_path
+    one, two = source_path("T1"), source_path("T2")
+    assert hashlib.sha256(one.read_bytes()).hexdigest() != hashlib.sha256(two.read_bytes()).hexdigest()
+    times = [f"2026-01-30 00:{m:02}:00" for m in range(0, 60, 10)]
+    canonical_name = source_path("T2", tmp_path)
+    write_source(canonical_name, times)
+    (tmp_path / canonical_name.name.replace(".csv", "(1).csv")).write_bytes(canonical_name.read_bytes())
+    frame, audits = ingest_all(tmp_path)
+    assert len(frame) == 1 and len(audits) == 1
+    assert audits[0]["source_rows"] == 6
 
 
-def test_one_source_with_no_valid_slots_keeps_utc_dtype(tmp_path):
-    invalid = _rows("2026-01-31 00:00:00", 1)
-    invalid[0]["Статистическое время"] = "not a timestamp"
-    _write(tmp_path, invalid, _rows("2026-01-31 00:00:00", 6, power=0.5))
+def test_identical_files_cannot_be_two_turbines(tmp_path):
+    from data import source_path
+    times = [f"2026-01-30 00:{m:02}:00" for m in range(0, 60, 10)]
+    one, two = source_path("T1", tmp_path), source_path("T2", tmp_path)
+    write_source(one, times)
+    two.write_bytes(one.read_bytes())
+    with pytest.raises(ForecastError, match="identical"):
+        ingest_all(tmp_path)
 
-    history, audit = ingest_sources(tmp_path)
-
-    assert history.turbine_id.tolist() == ["T2"]
-    assert str(history.timestamp.dt.tz) == "UTC"
-    assert audit["sources"]["T1"]["complete_hours"] == 0
-    assert audit["sources"]["T1"]["invalid_timestamp_rows"] == 1

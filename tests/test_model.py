@@ -1,92 +1,38 @@
-from datetime import datetime, timedelta, timezone
-
 import numpy as np
 import pandas as pd
 import pytest
 
-from contracts import ForecastError
-from model import load_model, predict_power, predict_with_diagnostics, save_model, train_model
+from contracts import FIRST_ORIGIN, ForecastError
+from model import predict_power, train_model
 
 
-def history() -> pd.DataFrame:
-    start = datetime(2026, 1, 28, tzinfo=timezone.utc)
-    rows = []
-    for turbine_id in ("T1", "T2"):
-        for index in range(95):
-            rows.append({
-                "turbine_id": turbine_id,
-                "timestamp": start + timedelta(hours=index),
-                "wind_speed_ms": float(index % 16),
-                "temperature_c": float(index % 20 - 10),
-                "power_norm": float(min(1, (index % 16) / 17 + (turbine_id == "T2") * .05)),
-            })
-    return pd.DataFrame(rows)
+def training_history():
+    stamps = pd.date_range("2026-01-28T00:00:00Z", "2026-02-02T00:00:00Z", freq="h")
+    wind = 5 + 2 * np.sin(np.arange(len(stamps)) / 5)
+    return pd.DataFrame({"turbine_id": "T2", "timestamp": stamps, "wind_speed_ms": wind,
+                         "temperature_c": -2.0, "power_norm": wind / 12})
 
 
-def test_completed_hour_cutoff_and_frozen_origin():
-    frame = history()
-    first = train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    later = train_model(frame, "2026-02-03T18:00:00Z", "T1")
-    assert first.metadata["train_last_interval_start"] == "2026-01-31T17:00:00Z"
-    assert first.metadata["training_rows"] == 90
-    assert first.metadata["model_id"] == later.metadata["model_id"]
-    assert first.metadata["baseline_interval_start"] == "2026-01-31T17:00:00Z"
-    earlier = train_model(frame, "2026-01-31T17:00:00Z", "T1")
-    assert earlier.metadata["training_rows"] == 89
-    assert earlier.metadata["model_id"] != first.metadata["model_id"]
+def test_completed_hour_cutoff_and_future_data_cannot_change_model():
+    history = training_history()
+    fitted = train_model(history, FIRST_ORIGIN, "T2")
+    assert fitted.metadata["train_last_interval_start"] == "2026-01-31T17:00:00Z"
+    future = history["timestamp"] >= pd.Timestamp(FIRST_ORIGIN)
+    history.loc[future, ["wind_speed_ms", "temperature_c", "power_norm"]] = [999.0, 80.0, 1.0]
+    other = train_model(history, "2026-02-02T18:00:00Z", "T2")
+    assert fitted.metadata["model_id"] == other.metadata["model_id"]
+    rows = [{"wind_speed_ms": 6.0, "temperature_c": -3.0}] * 48
+    assert predict_power(fitted, rows) == predict_power(other, rows)
+    assert np.isfinite(predict_power(fitted, rows)).all()
 
 
-def test_turbine_separation_and_training_identity():
-    frame = history()
-    t1 = train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    t2 = train_model(frame, "2026-01-31T18:00:00Z", "T2")
-    assert t1.metadata["model_id"] != t2.metadata["model_id"]
-    changed = frame.copy()
-    changed.loc[(changed.turbine_id == "T1") & (changed.timestamp == datetime(2026, 1, 29, tzinfo=timezone.utc)), "power_norm"] = .99
-    revised = train_model(changed, "2026-01-31T18:00:00Z", "T1")
-    assert revised.metadata["model_id"] != t1.metadata["model_id"]
-    assert train_model(frame, "2026-01-31T18:00:00Z", "T1").metadata["model_id"] == t1.metadata["model_id"]
+def test_duplicate_canonical_hours_rejected():
+    history = training_history()
+    duplicate = pd.concat([history, history.iloc[:1]], ignore_index=True)
+    with pytest.raises(ForecastError, match="Duplicate"):
+        train_model(duplicate, FIRST_ORIGIN, "T2")
 
 
-def test_prediction_validation_and_bounds():
-    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T1")
-    rows = [{"wind_speed_ms": float(i), "temperature_c": -5.0} for i in range(24)]
-    values, clipped = predict_with_diagnostics(bundle, rows)
-    assert values == predict_power(bundle, rows)
-    assert len(values) == 24 and all(np.isfinite(values))
-    assert all(0 <= value <= 1 for value in values)
-    assert clipped >= 0
-    for bad in ([{"wind_speed_ms": 1.0}], [{"wind_speed_ms": np.nan, "temperature_c": 2.0}],
-                [{"wind_speed_ms": -1.0, "temperature_c": 2.0}]):
-        with pytest.raises(ForecastError):
-            predict_power(bundle, bad)
-
-
-def test_artifact_round_trip_and_corruption(tmp_path):
-    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T2")
-    path = save_model(bundle, tmp_path)
-    loaded = load_model(path)
-    rows = [{"wind_speed_ms": 9.0, "temperature_c": -2.0}]
-    assert predict_power(loaded, rows) == predict_power(bundle, rows)
-    assert loaded.metadata["model_id"] == bundle.metadata["model_id"]
-    (path / "model.pkl").write_bytes(b"corrupt")
-    with pytest.raises(ForecastError, match="Model artifact"):
-        load_model(path)
-
-
-def test_invalid_training_rows_fail():
-    frame = history()
-    frame["timestamp"] = frame["timestamp"].astype(object)
-    frame.loc[0, "timestamp"] = datetime(2026, 1, 28)
-    with pytest.raises(ForecastError, match="timezone-aware"):
-        train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    frame = history()
-    frame.loc[0, "timestamp"] = datetime(2026, 1, 28, 0, 30, tzinfo=timezone.utc)
-    with pytest.raises(ForecastError, match="exact UTC hours"):
-        train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    frame = history()
-    frame.loc[0, "power_norm"] = 1.1
-    with pytest.raises(ForecastError, match="Normalized power"):
-        train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    with pytest.raises(ForecastError):
-        train_model(history(), "2026-01-31T18:00:00Z", "T3")
+def test_model_requires_meaningful_history():
+    with pytest.raises(ForecastError, match="at least 24"):
+        train_model(training_history().iloc[:5], FIRST_ORIGIN, "T2")

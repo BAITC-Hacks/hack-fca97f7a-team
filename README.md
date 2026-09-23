@@ -1,116 +1,156 @@
-# hack-fca97f7a-team
-Hackathon team repository for гок-гок алем
+# Wind power forecast — React + FastAPI
 
-Первая локальная версия модели обучена для **обеих турбин** на реальных предоставленных измерениях. Реализованы подготовка данных, обучение, сохранение/загрузка моделей и численный инференс. Погодный API, агент полного прогнозного цикла, UI и LLM пока не реализованы.
+Implementation backlog for three developers: [tasks.md](tasks.md). The demo must
+be fully in Russian; localization is tracked there as required remaining work.
 
-## Быстрый повторный запуск
+The active application is a React frontend with a FastAPI backend:
 
-Проверено на macOS ARM64, Python **3.14.7**, в локальной `.venv`; версии библиотек зафиксированы в `requirements.txt`. Команды выполняются из корня репозитория:
+**Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
+
+Both turbine models are trained from their separate real datasets. Weather and
+map coordinates are still labeled fixtures. OpenAI explanation and forecast
+questions are real integrations, with an explicit computed fallback when the
+key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
+
+## Run the app
+
+Requires Python **3.12+** (tested 3.14.4) and Node **22+**.
 
 ```sh
-source .venv/bin/activate
-export LOKY_MAX_CPU_COUNT=1
-python -m scripts.train --mode fixture
-python -m scripts.smoke_model --models-dir artifacts/models
-python -m pytest -q
-```
-
-Для нового окружения сначала выполнить:
-
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+. .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m scripts.make_fixtures
+python -m scripts.train --mode fixture
+npm --prefix frontend ci
+npm --prefix frontend run build
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
-`LOKY_MAX_CPU_COUNT=1` устраняет предупреждение определения физических ядер в ограниченном окружении; сама модель также ограничивает вычислительные потоки. GPU и ключи API не нужны. `--mode fixture` описывает будущий режим погоды: **обучение всегда на реальных измерениях**, а внешняя погода при fit не запрашивается. `--skip-validation` позволяет пропустить отдельную январскую диагностику, сохраняя все проверки данных/cutoff.
+Open **http://localhost:8000**. FastAPI serves the built React app on the same
+port; interactive API documentation is at **http://localhost:8000/docs**.
 
-## Исходные данные и аудит
+For frontend hot reload, keep FastAPI on port 8000 and run this in another terminal:
 
-В `data/` нужны неизменённые файлы с точными именами:
+```sh
+npm --prefix frontend run dev
+```
 
-- `Dataset HackAlemAI для участников 11.03.2023-28.02.2026 - turbine 1.csv`
-- `Dataset HackAlemAI для участников 11.03.2023-28.02.2026 - turbine 2.csv`
+Open http://localhost:5173; Vite proxies `/api` to FastAPI.
 
-В текущем рабочем каталоге они скопированы из Downloads; исходники в Downloads не изменялись. Хэши проверяются при обучении:
+## OpenAI configuration
+
+Copy `.env.example` to `.env` only if you do not already have a `.env`, then set:
 
 ```text
-T1: c4c341582fb2dd348b7187f0128cff265fe055f469413871ebb5db50eef58b5b
-T2: 820578cd18bb557cd30c2e102f3ae5a386dfc6c489a5a15743339c2b017305e5
+OPENAI_API_KEY=your-server-side-key
+OPENAI_MODEL=gpt-5.4-mini
+SUMMARY_BACKEND=llm
+DATA_MODE=fixture
 ```
 
-Источники независимы: 142 360 и 149 499 строк. Оба заканчиваются 31 января 2026; февральских наблюдений нет. Исходное время принято как начало десятиминутного интервала в `Asia/Almaty`, с историческими сменами UTC-смещения. По шесть неоднозначных временных меток каждой турбины исключены. Это допущение ещё нужно подтвердить организатором.
+The current workspace already has the supplied key in ignored `.env` with
+owner-only permissions. Environment variables take precedence over `.env`.
+Never place keys in React, `VITE_` variables, Git or prompts. No NVIDIA adapter is
+needed for this slice.
 
-Почасовая агрегация требует всех шести различных десятиминутных интервалов и сохраняет нулевую мощность. Неполные часы и отсутствующие интервалы не заполняются. Полный аудит записывается в [data/canonical/audit.json](data/canonical/audit.json), каноническая история — в [data/canonical/history.csv](data/canonical/history.csv).
+The backend uses the OpenAI Responses API with an 8-second timeout and no automatic
+retries. Numeric forecasts appear first. Missing key, timeout or provider failure
+returns a labeled local answer; it does not discard or change the forecast.
 
-| Показатель | T1 | T2 |
-|---|---:|---:|
-| Полные часы до фильтра обучения | 23 666 | 24 784 |
-| Неполные часы, исключены | 96 | 219 |
-| Часы, полностью отсутствующие внутри диапазона UTC | 1 631 | 390 |
-| Часы финального обучения | **23 665** | **24 783** |
+## Demo
 
-Последний обучающий интервал каждой модели начинается `2026-01-31T17:00:00Z` и заканчивается в фиксированный cutoff `2026-01-31T18:00:00Z`. Более поздний полный час из исходника в обучение не попал.
+1. Select T1/T2 on the map or selector. Keep January 31, 2026 and 48 hours.
+2. Click **Predict generation**. Inspect the power chart and hourly table.
+3. Click **Inspect model input CSV** to download the exact file the predictor read.
+4. Read the explanation; its label distinguishes OpenAI from computed fallback.
+5. Ask: **Which six-hour period has the highest average output?** The window is
+   calculated locally and supplied to the explanation model.
+6. Click **Advance one day & recalculate** to compare overlapping target hours.
 
-## Модели и проверка
+Fixture weather exists only for January 31 and February 1 at 23:00 Asia/Almaty.
+Other origins return an explicit error. Archive mode reports unavailable until
+verified coordinates/weather are integrated. Input changes clear stale results.
 
-Отдельный `HistGradientBoostingRegressor(max_iter=100, max_leaf_nodes=15, random_state=42)` на турбину. Порядок признаков: `wind_speed_ms`, `temperature_c`; цель — средняя нормализованная мощность часа. Численный вывод ограничен `[0,1]`, это **не МВт/МВт·ч**. Пропущенные/нефинитные признаки на инференсе отклоняются.
+## The module seams
 
-Дополнительно выполнен хронологический holdout: обучение диагностической модели на завершённых часах до `2026-01-01T00:00:00Z`, проверка на 738 январских часах каждой турбины, заканчивающихся не позднее основного cutoff. После диагностики финальные модели обучены заново с включением допустимого января.
+**Read [CONTRACTS.md](CONTRACTS.md) for exact HTTP routes, JSON, CSV schema,
+Python signatures and instructions for replacing each component.**
 
-**Эта диагностика использует измеренные ветер и температуру целевого часа. Это не проверка качества реального прогноза на 24/48 часов.**
+| Owner | Modules | Replace/improve here |
+|---|---|---|
+| A — integration/weather | `api.py`, `agent.py`, `weather.py`, `contracts.py` | transport, orchestration, verified weather/site adapter |
+| B — data/model | `data.py`, `model_input.py`, `model.py`, `scripts/train.py` | source ingestion, canonical CSV schema, fitting/inference, replay |
+| C — UI/explanation | `frontend/`, `explanation.py` | React views, central API client/types, OpenAI prose/questions |
 
-| Диагностика на измеренной погоде | T1 | T2 |
-|---|---:|---:|
-| MAE, нормализованные доли | 0.02373 | 0.02592 |
-| RMSE, нормализованные доли | 0.04802 | 0.06225 |
+The CSV seam is **real inference input**, not an export fabricated afterward:
 
-Baseline в полном отчёте — одно последнее наблюдение до holdout, замороженное на весь январь. Это простой ориентир, а не baseline с ежедневным обновлением. Февральские метрики отсутствуют.
-
-Фактические проверки 23 сентября 2026:
-
-- `python -m scripts.train --mode fixture`: обе модели сохранены; ingestion + январская диагностика + финальный fit заняли **2.94 секунды** внутри CLI, без времени установки/импорта библиотек. Финальные fit: T1 0.162 с, T2 0.150 с.
-- `LOKY_MAX_CPU_COUNT=1 python -m pytest -q`: **10 passed**, 1.05 с.
-- `python -m scripts.smoke_model --models-dir artifacts/models`: **8 passed** — T1/T2 × два origin × 24/48 часов; форма, конечность, `[0,1]`, одинаковый результат после повторной загрузки артефакта.
-
-В smoke используются синтетические погодные признаки, не фактическая будущая погода и не архивный прогноз. Это проверка загрузки/численного инференса, не браузерная проверка, не Streamlit AppTest и не проверка полного агента.
-
-## Где лежат результаты и как подключить
-
-- [artifacts/models/latest.json](artifacts/models/latest.json) — реестр путей артефактов T1/T2.
-- `artifacts/models/T1/<digest>/` и `artifacts/models/T2/<digest>/` — `model.pkl` и `metadata.json` с хэшами, признаками, cutoff, baseline, окружением и диагностикой.
-- [artifacts/training/training_report.json](artifacts/training/training_report.json) — фактический отчёт обучения.
-- [artifacts/training/smoke_report.json](artifacts/training/smoke_report.json) — восемь проверок инференса.
-- `artifacts/training/T1_january_diagnostic.csv` и `T2_january_diagnostic.csv` — диагностические наблюдения/предсказания.
-
-Исходные CSV, `.venv` и генерируемые результаты игнорируются Git; для другой машины исходники нужно разместить отдельно и повторить обучение. Загрузчик проверяет хэш, идентичность, порядок признаков и совместимость Python/scikit-learn. Использовать только доверенные локально созданные pickle-артефакты.
-
-Минимальный пример подключения бэкендом; все 24 погодные строки ниже **синтетические, только для проверки вызова**:
-
-```python
-import json
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from model import load_model, predict_power
-
-registry = json.loads(Path("artifacts/models/latest.json").read_text())
-bundle = load_model(registry["T2"])
-origin = datetime(2026, 1, 31, 18, tzinfo=timezone.utc)
-weather_rows = [
-    {"valid_at": (origin + timedelta(hours=h)).isoformat(),
-     "wind_speed_ms": 7.2, "temperature_c": -5.0}
-    for h in range(1, 25)
-]
-values = predict_power(bundle, weather_rows)
-assert len(values) == 24
+```csv
+turbine_id,valid_at,wind_speed_ms,temperature_c
+T2,2026-01-31T19:00:00Z,6.2,-4.0
 ```
 
-`predict_power` принимает нормализованные признаки и сохраняет порядок строк. Проверка исторической доступности погоды, полноты целевого окна и зарегистрированных координат должна выполняться будущим агентом **до** этого вызова; модель не заменяет погодный адаптер.
+`model_input.write_model_input` validates and atomically writes it to
+`artifacts/model_inputs/<sha256>.csv`. `model.predict_power_csv` reads those bytes,
+checks checksum/header/turbine/hour coverage, and runs inference in row order.
+Forecast responses include schema version, checksum, row count and filename.
+The HTTP download rechecks integrity. A trace shows CSV creation and prediction.
 
-## Дальнейшие задачи
+Predictions are stored server-side under a forecast ID; summary/question endpoints
+accept that ID rather than client-authored predictions. In-memory stores retain
+64 forecasts, so a server restart/eviction requires generating the forecast again.
+Use one worker for this local demo. No database, queues or distributed services.
 
-- A: реализовать `weather.py`/`agent.py`, подтвердить координаты и as-issued архив, затем подключить тонкий HTTP-слой при старте фронтенда.
-- B: подтвердить timezone/семантику интервалов и нормализацию, проверить модель на действительно доступной архивной погоде; полный февральский replay — отдельно.
-- C: подключить Streamlit/фронтенд к замороженным контрактам и вычисляемое резюме; LLM добавить через отдельный ограниченный адаптер позднее.
+## Data and assumptions
 
-Схемы связи компонентов: [INTEGRATION.md](INTEGRATION.md). План выполненного параллельного обучения: [TRAINING_PLAN.md](TRAINING_PLAN.md). Полное соответствие задаче организатора пока не достигнуто: архивная погода, replay, интерфейс и LLM отсутствуют.
+Source CSVs and brief in `data/` remain unchanged. T1 has 142,360 records and T2
+149,499. Both end January 31, 2026; February truth is absent despite filenames.
+
+Assume ten-minute interval starts in Asia/Almaty. Drop/report ambiguous local
+times and incomplete hours. Each retained hour averages six complete samples.
+Zero-power observations are retained. Generated data/audits are under ignored
+`data/canonical/`; models and inference CSVs are under ignored `artifacts/`.
+
+| Turbine | Complete hourly observations | Frozen training hours |
+|---|---:|---:|
+| T1 | 23,666 | 23,665 |
+| T2 | 24,784 | 24,783 |
+
+Training uses only completed hours at or before `2026-01-31T18:00:00Z`; its last
+interval starts at 17:00 UTC. Predictions start at origin+1 hour. Models stay frozen
+for the next origin; February labels/observed weather cannot enter the predictor.
+
+Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
+normalization denominator and source timestamp convention still need confirmation.
+No farm total, calibrated uncertainty or accuracy claim without held-out truth.
+Map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
+
+## Validation
+
+```sh
+python -m pytest -q
+npm --prefix frontend run build
+```
+
+**41 Python tests pass** and the React TypeScript/Vite build passes. Tests cover
+CSV consumption/integrity, chronology, source identities, input/output validation,
+cache, HTTP/downloads, stored forecast context, summary fallback and legacy UI.
+Tests clear OPENAI_API_KEY and mock SDK responses; they spend no API credits.
+FastAPI TestClient needs local socket permissions in restricted environments.
+
+One explicitly user-approved live test succeeded with `gpt-5.4-mini`: 24 generated
+T2 weather rows → real CSV inference → LLM explanation, with no fallback. No raw
+training CSV was sent. The React browser smoke test used an empty key and passed forecast rendering,
+48-row model-input CSV download, a six-hour-window question, next-day comparison,
+and the JavaScript error check (none).
+
+## Remaining work
+
+- Resolve actual turbine coordinates and verify as-issued archived weather access.
+- Implement February replay over all 28 daily origins and both turbines.
+- Validate feature mismatch between measured training weather and forecast inputs.
+- Confirm timezone/interval/normalization metadata; score only if truth is supplied.
+
+The current app is a working demo with explicit weather/location stubs, not a
+claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
+working rules and [PLAN.md](PLAN.md) for current scope.
