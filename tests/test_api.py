@@ -23,7 +23,7 @@ def test_health_and_sites_do_not_expose_credentials(monkeypatch):
     assert response.json() == {"status": "ok", "llm_configured": True, "summary_backend": "llm"}
     assert "test-secret-value" not in response.text
     assert client.get("/api/sites?mode=fixture").json()["sites"][0]["turbine_id"] == "T1"
-    assert client.get("/api/sites?mode=archive").json() == {"sites": []}
+    assert [site["turbine_id"] for site in client.get("/api/sites?mode=archive").json()["sites"]] == ["T1", "T2"]
 
 
 def test_forecast_runs_core_and_downloads_forecast_csv():
@@ -104,6 +104,20 @@ def test_explanations_use_stored_result_and_ignore_client_prediction(monkeypatch
     assert response.json()["text"] == "mocked"
     assert seen[0][0]["fingerprint"] == created["fingerprint"]
     assert seen[0][1] == "llm"
+
+
+def test_unexpected_tool_failure_is_sanitized_http_500(monkeypatch):
+    import agent
+    secret = "secret-provider-internal-value"
+
+    def broken_weather(*args):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(api, "run_forecast", lambda request: agent.run_forecast(request, weather_tool=broken_weather))
+    response = client.post("/api/forecasts", json=VALID)
+    assert response.status_code == 500
+    assert response.json()["code"] == "INTERNAL_ERROR"
+    assert secret not in response.text
 
 
 def test_archive_forecast_maps_missing_weather_to_503():

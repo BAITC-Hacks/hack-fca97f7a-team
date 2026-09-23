@@ -23,10 +23,11 @@ def test_registered_fixture_sites_and_runs():
 
 
 def test_archive_never_uses_fixtures():
-    assert load_sites("archive") == []
-    with pytest.raises(ForecastError, match="archived weather") as error:
+    assert [site["turbine_id"] for site in load_sites("archive")] == ["T1", "T2"]
+    assert load_sites("archive")[0]["coordinate_status"] == "organizer-supplied"
+    with pytest.raises(ForecastError) as error:
         fetch_weather(load_sites()[0], ORIGINS[0], 24, "archive")
-    assert error.value.code == "WEATHER_UNAVAILABLE"
+    assert error.value.code == "INVALID_INPUT"
     with pytest.raises(ForecastError) as error:
         fetch_weather({"turbine_id": "T1", "latitude": 9}, ORIGINS[0], 24, "fixture")
     assert error.value.code == "INVALID_INPUT"

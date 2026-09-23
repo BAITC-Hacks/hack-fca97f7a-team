@@ -7,8 +7,9 @@ The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
-Both turbine models are trained from their separate real datasets. Weather and
-map coordinates are still labeled fixtures. OpenAI explanation and forecast
+Both turbine models are trained from their separate real datasets. Fixture-mode
+weather and map coordinates are synthetic; archive-mode coordinates are sourced
+from the organizer but historical weather eligibility remains unverified. OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
@@ -69,8 +70,9 @@ returns a labeled local answer; it does not discard or change the forecast.
 6. Click **Advance one day & recalculate** to compare overlapping target hours.
 
 Fixture weather exists only for January 31 and February 1 at 23:00 Asia/Almaty.
-Other origins return an explicit error. Archive mode reports unavailable until
-verified coordinates/weather are integrated. Input changes clear stale results.
+Other origins return an explicit error. Archive mode lists organizer-supplied
+coordinates but remains unavailable until independently reviewed, as-issued
+per-run weather evidence is configured. Input changes clear stale results.
 
 ## The module seams
 
@@ -123,7 +125,21 @@ for the next origin; February labels/observed weather cannot enter the predictor
 Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
 normalization denominator and source timestamp convention still need confirmation.
 No farm total, calibrated uncertainty or accuracy claim without held-out truth.
-Map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
+Fixture map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
+Archive coordinates T1 (43.645150, 78.535604), T2 (43.643198, 78.538828)
+come from organizer links, not independent engineering identification. The
+[Open-Meteo verification note](docs/open-meteo-verification.md) records actual
+public endpoint probes, but those retrospective queries **do not prove**
+as-issued availability at the historical origin. `OPEN_METEO_ARCHIVE_MANIFEST`
+(optional, unset by default) must point to an operator-reviewed external capture
+evidence manifest; see [CONTRACTS.md](CONTRACTS.md#weather-seam--a-owns-weatherpy)
+for exact schema and fail-closed rules. No key or new live mode is required by
+the public endpoint. Responses must match the trusted capture's versioned canonical *full-forecast*
+SHA-256 (not volatile raw JSON bytes). Exact retrieved bytes retain a separate
+`raw_sha256` artifact checksum. Wind at 10 m from `ecmwf_ifs` is an explicit proxy; its mismatch against the
+unknown height of training sensors requires B's review. Archive has no silent
+fallback to demo fixtures. Without genuine historical evidence, retain fixture
+mode for the demo and do not claim archive readiness.
 
 ## Validation
 
@@ -132,7 +148,7 @@ python -m pytest -q
 npm --prefix frontend run build
 ```
 
-**41 Python tests pass** and the React TypeScript/Vite build passes. Tests cover
+Python tests and the React TypeScript/Vite build cover
 CSV consumption/integrity, chronology, source identities, input/output validation,
 cache, HTTP/downloads, stored forecast context, summary fallback and legacy UI.
 Tests clear OPENAI_API_KEY and mock SDK responses; they spend no API credits.
@@ -146,7 +162,7 @@ and the JavaScript error check (none).
 
 ## Remaining work
 
-- Resolve actual turbine coordinates and verify as-issued archived weather access.
+- Obtain independently reviewable as-issued capture and availability evidence for historical runs; coordinates alone are insufficient.
 - Implement February replay over all 28 daily origins and both turbines.
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
