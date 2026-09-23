@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from contracts import FIRST_ORIGIN, ForecastError
-from model import (FORECAST_RECIPES, load_model, predict_power_csv,
+from backend.core.contracts import FIRST_ORIGIN, ForecastError
+from backend.ml.model import (FORECAST_RECIPES, load_model, predict_power_csv,
                    save_model, train_model)
-from model_input import write_model_input
+from backend.ml.model_input import write_model_input
 
 
 def history():

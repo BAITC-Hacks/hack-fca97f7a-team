@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from contracts import ForecastError
+from backend.core.contracts import ForecastError
 from scripts.train_forecast import align_history, promotion_gate, temporal_window
 
 

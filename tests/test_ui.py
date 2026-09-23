@@ -6,7 +6,7 @@ Real Leaflet marker interactions are checked separately in browser smoke tests.
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from contracts import ROOT
+from backend.core.contracts import ROOT
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def ui(monkeypatch):
     monkeypatch.setenv("SUMMARY_BACKEND", "template")
     # AppTest does not execute iframe JavaScript, so simulate only the map event.
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: {"last_object_clicked": None})
-    return AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+    return AppTest.from_file(str(ROOT / "legacy" / "app.py"), default_timeout=15).run()
 
 
 def test_ui_forecast_update_and_stale_results(ui):
@@ -48,7 +48,7 @@ def test_marker_identity_and_background_click(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "fixture")
     event = {"last_object_clicked": {"lat": 43.643198, "lng": 78.538828}}
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: event)
-    app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+    app = AppTest.from_file(str(ROOT / "legacy" / "app.py"), default_timeout=15).run()
     assert not app.exception
     assert app.selectbox(key="selected_site").value == "T2"
     assert "result" not in app.session_state
@@ -62,7 +62,7 @@ def test_archive_mode_does_not_display_fixture_forecast(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "archive")
     monkeypatch.delenv("OPEN_METEO_ARCHIVE_MANIFEST", raising=False)
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: {"last_object_clicked": None})
-    app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+    app = AppTest.from_file(str(ROOT / "legacy" / "app.py"), default_timeout=15).run()
     assert not app.exception
     assert app.selectbox(key="selected_site").options == ["Choose a turbine", "T1", "T2"]
     app.selectbox(key="selected_site").select("T1").run()

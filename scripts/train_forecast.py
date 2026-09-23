@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, artifact_dir
-from data import ingest_all
-from model import FORECAST_RECIPES, _raw_predictions, save_model, train_model
+from backend.core.contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, artifact_dir
+from backend.ml.data import ingest_all
+from backend.ml.model import FORECAST_RECIPES, _raw_predictions, save_model, train_model
 from scripts.evaluate import score
 from scripts.fetch_training_weather import load_training_weather
 

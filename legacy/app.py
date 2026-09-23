@@ -10,10 +10,10 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from agent import run_forecast
-from contracts import fingerprint, forecast_csv
-from explanation import summarize_forecast
-from weather import load_sites
+from backend.services.agent import run_forecast
+from backend.core.contracts import fingerprint, forecast_csv
+from backend.adapters.explanation import summarize_forecast
+from backend.adapters.weather import load_sites
 
 
 INITIAL_ORIGIN_DATE = date(2026, 1, 31)

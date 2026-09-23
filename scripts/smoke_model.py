@@ -14,9 +14,9 @@ import sys
 
 import numpy as np
 
-import model
-from contracts import FEATURES, artifact_dir
-from model_input import write_model_input
+from backend.ml import model
+from backend.core.contracts import FEATURES, artifact_dir
+from backend.ml.model_input import write_model_input
 
 
 ROOT = Path(__file__).resolve().parents[1]

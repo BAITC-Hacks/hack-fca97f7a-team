@@ -13,7 +13,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from contracts import FEATURES, SITE_IDS, ForecastError, artifact_dir, expected_hours
+from backend.core.contracts import FEATURES, SITE_IDS, ForecastError, artifact_dir, expected_hours
 
 SCHEMA_VERSION = "weather-features-v1"
 COLUMNS = ["turbine_id", "valid_at", *FEATURES]

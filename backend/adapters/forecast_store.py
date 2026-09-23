@@ -15,7 +15,7 @@ import threading
 import time
 from pathlib import Path
 
-from contracts import ForecastError, artifact_dir, expected_hours
+from backend.core.contracts import ForecastError, artifact_dir, expected_hours
 
 MAX_FILES = 256
 MAX_AGE_SECONDS = 7 * 24 * 60 * 60

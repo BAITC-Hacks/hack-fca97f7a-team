@@ -1,0 +1,1 @@
+"""Wind power forecasting backend."""

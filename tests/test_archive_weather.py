@@ -5,14 +5,14 @@ import json
 import httpx
 import pytest
 
-import agent
-import weather
-from contracts import FIRST_ORIGIN, ForecastError, expected_hours
+from backend.services import agent
+from backend.adapters import weather
+from backend.core.contracts import FIRST_ORIGIN, ForecastError, expected_hours
 
 
 def _payload(origin=FIRST_ORIGIN):
     from datetime import timedelta
-    from contracts import iso, utc_time
+    from backend.core.contracts import iso, utc_time
     stamps = [iso(utc_time(origin) + timedelta(hours=i)).removesuffix("Z") for i in range(72)]
     return {"timezone": "GMT", "latitude": 43.620384, "longitude": 78.47891,
             "utc_offset_seconds": 0,
@@ -169,7 +169,7 @@ def test_missing_run_evidence_blocks_before_network(setup_archive, monkeypatch):
 
 def test_raw_capture_is_atomic_and_existing_mismatch_blocks(setup_archive, monkeypatch):
     site, data, record, calls, save = setup_archive
-    from contracts import artifact_dir
+    from backend.core.contracts import artifact_dir
     result = weather.fetch_weather(site, FIRST_ORIGIN, 24, "archive")
     target = artifact_dir() / "weather_raw" / f"{result['manifest']['raw_sha256']}.json"
     assert target.read_bytes() == _bytes(data)
@@ -183,7 +183,7 @@ def test_raw_capture_is_atomic_and_existing_mismatch_blocks(setup_archive, monke
 
 def test_raw_capture_failed_atomic_replace_cleans_temp(setup_archive, monkeypatch):
     site, data, record, calls, save = setup_archive
-    from contracts import artifact_dir
+    from backend.core.contracts import artifact_dir
     def fail_replace(*args):
         raise OSError("internal-path-secret")
     monkeypatch.setattr(weather.os, "replace", fail_replace)
@@ -236,8 +236,8 @@ def test_agent_real_csv_and_fitted_model(setup_archive, monkeypatch, provider_mo
     result = agent.run_forecast(request, model_loader=lambda turbine: fitted)
     assert result["status"] == "ok", result
     assert result["model_input"]["row_count"] == 24
-    from model_input import read_model_input
-    from contracts import artifact_dir
+    from backend.ml.model_input import read_model_input
+    from backend.core.contracts import artifact_dir
     rows = read_model_input(artifact_dir() / "model_inputs" / result["model_input"]["filename"],
                             turbine_id="T1", origin=FIRST_ORIGIN, horizon_hours=24,
                             expected_sha256=result["model_input"]["sha256"])

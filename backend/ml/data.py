@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from contracts import FEATURES, SITE_IDS, SITE_TIMEZONE, ForecastError, data_dir
+from backend.core.contracts import FEATURES, SITE_IDS, SITE_TIMEZONE, ForecastError, data_dir
 
 COLUMNS = {
     "Статистическое время": "timestamp",

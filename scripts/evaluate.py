@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS
-from data import ingest_all
-from model import _PARAMETERS as MODEL_PARAMETERS, _raw_predictions, train_model
+from backend.core.contracts import FEATURES, FIRST_ORIGIN, SITE_IDS
+from backend.ml.data import ingest_all
+from backend.ml.model import _PARAMETERS as MODEL_PARAMETERS, _raw_predictions, train_model
 
 
 PERIODS = {

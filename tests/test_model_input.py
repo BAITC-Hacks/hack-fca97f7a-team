@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from contracts import FIRST_ORIGIN, ForecastError, artifact_dir
-from model_input import COLUMNS, read_model_input, write_model_input
-from weather import fetch_weather, load_sites
+from backend.core.contracts import FIRST_ORIGIN, ForecastError, artifact_dir
+from backend.ml.model_input import COLUMNS, read_model_input, write_model_input
+from backend.adapters.weather import fetch_weather, load_sites
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_csv_mutation_rejected(csv_input):
 
 
 def test_csv_is_required_by_prediction(csv_input, monkeypatch):
-    from model import load_model, predict_power_csv
+    from backend.ml.model import load_model, predict_power_csv
     _, metadata, path = csv_input
     with monkeypatch.context() as original_artifacts:
         original_artifacts.delenv("ARTIFACT_DIR", raising=False)
@@ -58,7 +58,7 @@ def test_csv_is_required_by_prediction(csv_input, monkeypatch):
 
 
 def test_legacy_flat_artifact_remains_usable_through_csv(csv_input, monkeypatch, tmp_path):
-    from model import PowerModel, load_model, predict_power_csv
+    from backend.ml.model import PowerModel, load_model, predict_power_csv
     _, metadata, path = csv_input
     legacy_root = tmp_path / "legacy"
     models_dir = legacy_root / "models"

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from threading import RLock
 from zoneinfo import ZoneInfo
 
-from contracts import SITE_TIMEZONE, fingerprint
+from backend.core.contracts import SITE_TIMEZONE, fingerprint
 
 _CACHE: OrderedDict[str, dict] = OrderedDict()
 _LOCK = RLock()

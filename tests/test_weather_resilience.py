@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-import agent
-import weather
-from contracts import FIRST_ORIGIN, ForecastError, expected_hours, iso
+from backend.services import agent
+from backend.adapters import weather
+from backend.core.contracts import FIRST_ORIGIN, ForecastError, expected_hours, iso
 
 
 @pytest.fixture

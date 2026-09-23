@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import explanation
-from explanation import answer_question, summarize_forecast
+from backend.adapters import explanation
+from backend.adapters.explanation import answer_question, summarize_forecast
 
 
 def success_result():
@@ -225,7 +225,7 @@ def test_llm_failure_preserves_computed_facts_without_exception_details(monkeypa
 
 def test_english_llm_response_uses_russian_fallback(monkeypatch):
     from types import SimpleNamespace
-    import explanation
+    from backend.adapters import explanation
     explanation._CACHE.clear()
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
     monkeypatch.setattr(explanation, "_create_client", lambda: SimpleNamespace(

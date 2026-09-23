@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 FIRST_ORIGIN = "2026-01-31T18:00:00Z"
 SITE_TIMEZONE = "Asia/Almaty"
 FEATURES = ["wind_speed_ms", "temperature_c"]
