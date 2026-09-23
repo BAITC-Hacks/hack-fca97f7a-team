@@ -25,7 +25,7 @@ Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /api/health` | none | `status`, `llm_configured`, `summary_backend`; never credentials |
-| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status}]}` |
+| `GET /api/sites?mode=fixture` | mode: fixture/archive | `{sites:[{turbine_id,latitude,longitude,timezone,coordinate_status,coordinate_source}]}` |
 | `POST /api/forecasts` | request below | forecast result plus `forecast_id` and `model_input` |
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
@@ -88,6 +88,14 @@ availability timestamps, availability basis, provenance status, raw checksum and
 interpolation policy. `initialized_at <= available_at <= origin` is mandatory.
 Archive mode requires verified provenance. The current adapter has two synthetic
 runs per turbine and returns a clear unavailable error for real archive mode.
+
+Site coordinates were supplied and mapped by the user: T1 is
+`43.645150, 78.535604` ([source](https://maps.app.goo.gl/iN6svMt69D5qRpFU9));
+T2 is `43.643198, 78.538828` ([source](https://maps.app.goo.gl/8UQMwsYavY6nLvFY8)).
+`coordinate_status=user_provided` describes this source; `coordinate_source` is
+the original Maps URL. Sites are available in both modes, while archive weather
+remains unavailable. The fixture weather is still synthetic. Coordinates are
+included in the existing forecast cache identity through the site metadata.
 
 To replace fixtures: implement archive retrieval behind this function, provide
 verified real sites via `load_sites`, and keep the bundle shape. Test malformed

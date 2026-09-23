@@ -6,6 +6,7 @@ export interface Site {
   longitude: number
   timezone: string
   coordinate_status: string
+  coordinate_source?: string
 }
 
 export interface ForecastRequest {

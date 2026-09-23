@@ -7,8 +7,8 @@ The active application is a React frontend with a FastAPI backend:
 
 **Select turbine → weather tool → validated CSV → model reads CSV → predictions → OpenAI explanation.**
 
-Both turbine models are trained from their separate real datasets. Weather and
-map coordinates are still labeled fixtures. OpenAI explanation and forecast
+Both turbine models are trained from their separate real datasets. Weather is
+still a labeled fixture; map coordinates come from the user's Google Maps links. OpenAI explanation and forecast
 questions are real integrations, with an explicit computed fallback when the
 key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
@@ -60,16 +60,18 @@ returns a labeled local answer; it does not discard or change the forecast.
 
 ## Демонстрация за 2–3 минуты
 
-1. Откройте приложение и покажите плашку «Демонстрационная погода и условные координаты». Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty.
+Согласованный минималистичный дизайн описан в [frontend/DESIGN.md](frontend/DESIGN.md).
+
+1. Откройте приложение. Слева — карта с координатами пользователя и параметры, справа — прогноз, под ним — анализ и чат. Выберите T1 на карте или в списке, дату 31.01.2026 и горизонт «48 часов». Время запуска — 23:00 Asia/Almaty. Погода остаётся демонстрационной.
 2. Нажмите **«Сформировать прогноз»**. Покажите график нормализованной мощности и раздел «Почасовые данные». Числовой результат появляется до объяснения.
-3. Нажмите **«Скачать входной CSV»**. Это точный файл, прочитанный моделью. Кнопка **«Скачать прогноз CSV»** выгружает результат.
+3. Нажмите **«Скачать прогноз CSV»** в панели результата. Под графиком доступны **PNG** (2200 × 840) и **SVG** с датой, турбиной, часовым поясом и легендой. В разделе **«Данные и метод расчёта»** нажмите **«Скачать входной CSV»** — это точный файл, прочитанный моделью.
 4. Покажите пометку «Объяснение ИИ» или «Расчётное объяснение — ИИ недоступен». Спросите: **«В какие шесть часов средняя мощность максимальна?»**. Шестичасовое среднее вычисляет сервер.
 5. Нажмите **«Следующий день и новый прогноз»**, затем покажите «Сравнение запусков» для совпадающих часов. Выберите T2 и повторите прогноз. При смене параметров предыдущий результат скрывается.
-6. Для проверки ошибок выберите «Проверенный архив»: появится сообщение о ненастроенных координатах. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
+6. Для проверки ошибок выберите «Проверенный архив» и нажмите «Сформировать прогноз»: появится сообщение о недоступной погоде. Верните «Демонстрационная погода». При дате вне 31 января и 1 февраля приложение покажет понятную ошибку.
 
 Сохранённая демонстрационная погода доступна только для 31 января и 1 февраля,
 23:00 Asia/Almaty. Карта загружает тайлы из сети; турбину всегда можно выбрать
-из списка. Режим архива заработает после подключения проверенных координат и
+из списка. Режим архива заработает после подключения проверенной архивной
 погоды. Повторный запуск сервера удаляет сохранённые ID прогнозов; сформируйте
 прогноз заново.
 
@@ -124,7 +126,15 @@ for the next origin; February labels/observed weather cannot enter the predictor
 Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
 normalization denominator and source timestamp convention still need confirmation.
 No farm total, calibrated uncertainty or accuracy claim without held-out truth.
-Map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
+Координаты и соответствие турбин подтверждены пользователем:
+
+| Турбина | Широта | Долгота | Источник |
+|---|---:|---:|---|
+| T1 | 43.645150 | 78.535604 | [Google Maps](https://maps.app.goo.gl/iN6svMt69D5qRpFU9) |
+| T2 | 43.643198 | 78.538828 | [Google Maps](https://maps.app.goo.gl/8UQMwsYavY6nLvFY8) |
+
+API помечает их как `user_provided` и возвращает исходную ссылку в
+`coordinate_source`. Это не меняет статус демонстрационных погодных данных.
 
 ## Validation
 
@@ -143,18 +153,23 @@ One explicitly user-approved live test succeeded with `gpt-5.4-mini`: 24 generat
 T2 weather rows → real CSV inference → LLM explanation, with no fallback. No raw
 training CSV was sent. An earlier React browser smoke test used an empty key and
 passed forecast rendering, 48-row model-input CSV download, a six-hour-window
-question, next-day comparison, and the JavaScript error check (none). The current
-Russian interface is verified by the build and Python explanation tests; a new
-browser rehearsal remains useful before presentation.
+question, next-day comparison, and the JavaScript error check (none).
+
+The minimal Russian UI was also checked in Chromium with an empty OpenAI key:
+T1/T2 × 24/48 hours, forecast/model-input CSV downloads, PNG (2200 × 840), SVG,
+two-question chat history, real weather-unavailable errors and retry, input
+invalidation, and a 390-pixel mobile viewport. Missing forecast IDs and delayed
+explanations were simulated in the browser to check recovery and stale responses.
+No JavaScript errors or paid OpenAI requests occurred.
 
 ## Remaining work
 
-- Resolve actual turbine coordinates and verify as-issued archived weather access.
+- Verify as-issued archived weather access for the user-supplied turbine coordinates.
 - Implement February replay over all 28 daily origins and both turbines.
 - Validate feature mismatch between measured training weather and forecast inputs.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
-The current app is a working demo with explicit weather/location stubs, not a
+The current app is a working demo with explicit synthetic weather and user-supplied coordinates, not a
 claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.
 
