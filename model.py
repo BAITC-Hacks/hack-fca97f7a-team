@@ -1,10 +1,13 @@
-"""Local per-turbine regression. No UI, weather transport or paid inference."""
+"""Per-turbine, frozen hourly power model and local artifact handling."""
+
 from __future__ import annotations
 
+from dataclasses import dataclass
+from hashlib import sha256
 import json
 import pickle
-from dataclasses import dataclass
 from pathlib import Path
+import platform
 
 import numpy as np
 import pandas as pd
@@ -12,9 +15,19 @@ import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 from threadpoolctl import threadpool_limits
 
-from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, artifact_dir, fingerprint, utc_time
+from contracts import FEATURES, FIRST_ORIGIN, SITE_IDS, ForecastError, utc_time, artifact_dir as default_artifact_dir
 
-PARAMS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
+def validate_origin(origin):
+    value = utc_time(origin)
+    if value.minute or value.second or value.microsecond:
+        raise ForecastError("INVALID_INPUT", "Origin must align to a UTC hour")
+    return value
+
+
+_PARAMETERS = {"max_iter": 100, "max_leaf_nodes": 15, "random_state": 42}
+_SCHEMA = 1
+_IMPLEMENTATION = "hourly-hgbr-v1"
+_UNITS = {"wind_speed_ms": "m/s", "temperature_c": "degC"}
 
 
 @dataclass
@@ -23,74 +36,243 @@ class PowerModel:
     metadata: dict
 
 
-def train_model(history: pd.DataFrame, origin: str, turbine_id: str) -> PowerModel:
-    cutoff = min(utc_time(origin), utc_time(FIRST_ORIGIN))
-    selected = history.loc[history["turbine_id"].eq(turbine_id)].copy()
-    selected["timestamp"] = pd.to_datetime(selected["timestamp"], utc=True)
-    selected = selected.loc[selected["timestamp"] + pd.Timedelta(hours=1) <= cutoff].sort_values("timestamp")
+ModelBundle = PowerModel
+
+
+def _iso(value: pd.Timestamp) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _digest(data: bytes) -> str:
+    return sha256(data).hexdigest()
+
+
+def _canonical_rows(frame: pd.DataFrame) -> bytes:
+    """Stable bytes for precisely the sorted rows used by fit."""
+    lines = []
+    for row in frame.itertuples(index=False):
+        lines.append(json.dumps(
+            [_iso(row.timestamp), *[float(getattr(row, name)).hex() for name in FEATURES],
+             float(row.power_norm).hex()],
+            separators=(",", ":"),
+        ))
+    return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def train_model(history: pd.DataFrame, origin: str, turbine_id: str) -> ModelBundle:
+    """Fit one turbine using only hours completed by both cutoffs."""
+    if turbine_id not in {"T1", "T2"}:
+        raise ForecastError("INVALID_INPUT", "Unknown turbine ID")
+    requested_cutoff = validate_origin(origin)
+    frozen_cutoff = validate_origin(FIRST_ORIGIN)
+    cutoff = pd.Timestamp(min(requested_cutoff, frozen_cutoff))
+    required = {"turbine_id", "timestamp", *FEATURES, "power_norm"}
+    if not isinstance(history, pd.DataFrame) or not required.issubset(history.columns):
+        raise ForecastError("DATA_INVALID", "Canonical history is missing required columns")
+    selected = history.loc[history["turbine_id"] == turbine_id,
+                           ["timestamp", *FEATURES, "power_norm"]].copy()
+    if selected.empty:
+        raise ForecastError("DATA_INVALID", f"No history for {turbine_id}")
+    try:
+        stamps = [pd.Timestamp(value) for value in selected["timestamp"]]
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ForecastError("DATA_INVALID", "Invalid history timestamp") from exc
+    if any(pd.isna(stamp) or stamp.tzinfo is None or stamp.utcoffset() is None
+           for stamp in stamps):
+        raise ForecastError("DATA_INVALID", "History timestamps must be timezone-aware")
+    selected["timestamp"] = pd.DatetimeIndex([stamp.tz_convert("UTC") for stamp in stamps])
+    if any(stamp.minute or stamp.second or stamp.microsecond or stamp.nanosecond
+           for stamp in selected["timestamp"]):
+        raise ForecastError("DATA_INVALID", "History timestamps must start on exact UTC hours")
+    selected = selected.loc[selected["timestamp"] + pd.Timedelta(hours=1) <= cutoff]
+    selected = selected.sort_values("timestamp", kind="stable").reset_index(drop=True)
+    if len(selected) < 24:
+        raise ForecastError("DATA_INVALID", "Training needs at least 24 complete historical hours")
     if selected["timestamp"].duplicated().any():
-        raise ForecastError("DATA_INVALID", "Duplicate canonical training hours.")
-    values = selected[FEATURES + ["power_norm"]].to_numpy(dtype=float)
-    if len(selected) < 24 or not np.isfinite(values).all():
-        raise ForecastError("DATA_INVALID", "Training needs at least 24 complete, finite historical hours.")
-    if not selected["power_norm"].between(0, 1).all() or not selected["wind_speed_ms"].ge(0).all():
-        raise ForecastError("DATA_INVALID", "Training values violate normalized-power/wind units.")
-    identity_rows = selected[["timestamp", *FEATURES, "power_norm"]].copy()
-    identity_rows["timestamp"] = identity_rows["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    identity = fingerprint({"turbine_id": turbine_id, "rows": identity_rows.to_dict("records"),
-                            "features": FEATURES, "params": PARAMS, "cutoff": cutoff.isoformat(),
-                            "sklearn": sklearn.__version__})
-    estimator = HistGradientBoostingRegressor(**PARAMS)
-    with threadpool_limits(limits=1):
-        estimator.fit(selected[FEATURES], selected["power_norm"])
-    metadata = {
-        "turbine_id": turbine_id, "model_id": identity,
-        "train_origin": cutoff.isoformat().replace("+00:00", "Z"),
-        "train_last_interval_start": identity_rows.iloc[-1]["timestamp"],
-        "training_rows": len(selected), "features": FEATURES, "params": PARAMS,
-        "baseline_norm": float(selected.iloc[-1]["power_norm"]),
-        "training_source": "supplied turbine measurements",
-        "sklearn_version": sklearn.__version__,
+        raise ForecastError("DATA_INVALID", "Duplicate hourly timestamps")
+    try:
+        numeric = selected[[*FEATURES, "power_norm"]].apply(pd.to_numeric, errors="raise")
+    except (ValueError, TypeError) as exc:
+        raise ForecastError("DATA_INVALID", "Nonnumeric training feature or label") from exc
+    values = numeric.to_numpy(dtype=float)
+    if not np.isfinite(values).all() or np.any(values[:, 0] < 0):
+        raise ForecastError("DATA_INVALID", "Training features or labels are invalid")
+    if np.any((values[:, -1] < 0) | (values[:, -1] > 1)):
+        raise ForecastError("DATA_INVALID", "Normalized power must be in [0, 1]")
+    selected[[*FEATURES, "power_norm"]] = numeric
+    canonical_sha = _digest(_canonical_rows(selected))
+    identity = {
+        "implementation": _IMPLEMENTATION,
+        "turbine_id": turbine_id,
+        "cutoff": _iso(cutoff),
+        "canonical_sha256": canonical_sha,
+        "feature_names": list(FEATURES),
+        "parameters": _PARAMETERS,
+        "python_version": platform.python_version(),
+        "library_versions": {"numpy": np.__version__, "pandas": pd.__version__,
+                             "scikit_learn": sklearn.__version__},
     }
-    return PowerModel(estimator, metadata)
-
-
-def predict_power(model: PowerModel, weather_rows: list[dict]) -> list[float]:
-    features = pd.DataFrame(weather_rows)[FEATURES].astype(float)
-    if not np.isfinite(features.to_numpy()).all():
-        raise ForecastError("DATA_INVALID", "Prediction features must be finite.")
+    model_id = "sha256:" + _digest(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
+    estimator = HistGradientBoostingRegressor(**_PARAMETERS)
     with threadpool_limits(limits=1):
-        return model.estimator.predict(features).tolist()
+        estimator.fit(values[:, :len(FEATURES)], values[:, -1])
+    last = selected.iloc[-1]
+    metadata = {
+        "artifact_schema_version": _SCHEMA,
+        "model_id": model_id,
+        "turbine_id": turbine_id,
+        "estimator": "HistGradientBoostingRegressor",
+        "parameters": _PARAMETERS.copy(),
+        "feature_names": list(FEATURES),
+        "feature_units": _UNITS.copy(),
+        "target": "power_norm",
+        "target_unit": "normalized_fraction",
+        "train_cutoff": _iso(cutoff),
+        "train_origin": _iso(cutoff),
+        "features": list(FEATURES),
+        "train_last_interval_start": _iso(last.timestamp),
+        "training_rows": len(selected),
+        "source_sha256": None,
+        "canonical_sha256": canonical_sha,
+        "artifact_sha256": None,
+        "timezone_assumption": "Asia/Almaty",
+        "interval_semantics": "source timestamps are ten-minute interval starts; hourly timestamps are starts",
+        "aggregation_policy": "six distinct ten-minute intervals per complete hour; arithmetic mean",
+        "baseline_norm": float(last.power_norm),
+        "baseline_interval_start": _iso(last.timestamp),
+        "python_version": identity["python_version"],
+        "library_versions": identity["library_versions"],
+        "validation": None,
+        "implementation": _IMPLEMENTATION,
+    }
+    return ModelBundle(estimator, metadata)
+
+
+def _predict_raw(model: ModelBundle, weather_rows: list[dict]) -> np.ndarray:
+    if not isinstance(model, ModelBundle) or not isinstance(model.estimator, HistGradientBoostingRegressor):
+        raise ForecastError("MODEL_UNAVAILABLE", "Invalid model bundle")
+    if model.metadata.get("feature_names", model.metadata.get("features")) != list(FEATURES):
+        raise ForecastError("MODEL_UNAVAILABLE", "Model feature order mismatch")
+    if not isinstance(weather_rows, list) or not weather_rows:
+        raise ForecastError("INVALID_INPUT", "Weather rows are required")
+    features = []
+    for row in weather_rows:
+        if not isinstance(row, dict) or any(name not in row for name in FEATURES):
+            raise ForecastError("DATA_INVALID", "Weather feature is missing")
+        try:
+            wind, temp = (float(row[name]) for name in FEATURES)
+        except (TypeError, ValueError) as exc:
+            raise ForecastError("DATA_INVALID", "Weather feature is nonnumeric") from exc
+        if not np.isfinite(wind) or not np.isfinite(temp) or wind < 0:
+            raise ForecastError("DATA_INVALID", "Weather feature is nonfinite or wind is negative")
+        features.append((wind, temp))
+    with threadpool_limits(limits=1):
+        raw = np.asarray(model.estimator.predict(np.asarray(features, dtype=float)), dtype=float)
+    if raw.shape != (len(features),) or not np.isfinite(raw).all():
+        raise ForecastError("DATA_INVALID", "Model produced invalid predictions")
+    return raw
+
+
+def predict_with_diagnostics(model: ModelBundle, weather_rows: list[dict]) -> tuple[list[float], int]:
+    raw = _predict_raw(model, weather_rows)
+    clipped_count = int(np.count_nonzero((raw < 0) | (raw > 1)))
+    return np.clip(raw, 0, 1).tolist(), clipped_count
+
+
+def predict_power(model: ModelBundle, weather_rows: list[dict]) -> list[float]:
+    return predict_with_diagnostics(model, weather_rows)[0]
+
+
+def save_model(bundle: ModelBundle, output_root: str | Path | None = None) -> Path:
+    """Write a versioned artifact; callers supply only a trusted local output root."""
+    output_root = Path(output_root) if output_root is not None else default_artifact_dir() / "models"
+    metadata = bundle.metadata.copy()
+    turbine_id = metadata.get("turbine_id")
+    model_id = metadata.get("model_id", "")
+    if turbine_id not in {"T1", "T2"} or not isinstance(model_id, str) or not model_id.startswith("sha256:"):
+        raise ForecastError("MODEL_UNAVAILABLE", "Invalid model identity")
+    artifact_dir = Path(output_root) / turbine_id / model_id.removeprefix("sha256:")
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    binary = pickle.dumps(bundle.estimator, protocol=pickle.HIGHEST_PROTOCOL)
+    metadata["artifact_sha256"] = _digest(binary)
+    (artifact_dir / "model.pkl").write_bytes(binary)
+    (artifact_dir / "metadata.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    bundle.metadata["artifact_sha256"] = metadata["artifact_sha256"]
+    index_path = output_root / "latest.json"
+    index = json.loads(index_path.read_text()) if index_path.exists() else {}
+    index[turbine_id] = str(artifact_dir.resolve())
+    temporary = index_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(index, indent=2))
+    temporary.replace(index_path)
+    return artifact_dir
+
+
+def load_model(artifact_dir: str | Path) -> ModelBundle:
+    """Load only a trusted locally generated artifact selected by the server."""
+    if isinstance(artifact_dir, str) and artifact_dir in SITE_IDS:
+        turbine_id = artifact_dir
+        directory = default_artifact_dir() / "models"
+        try:
+            index_path = directory / "latest.json"
+            if index_path.exists():
+                index = json.loads(index_path.read_text())
+                loaded = load_model(Path(index[turbine_id]))
+            else:
+                # Compatibility with trusted, locally trained pre-migration artifacts.
+                loaded = pickle.loads((directory / f"{turbine_id}.pkl").read_bytes())
+            if not isinstance(loaded, PowerModel) or loaded.metadata.get("turbine_id") != turbine_id:
+                raise ValueError("turbine identity")
+            return loaded
+        except (OSError, ValueError, KeyError, TypeError, pickle.UnpicklingError, EOFError, AttributeError) as exc:
+            raise ForecastError("MODEL_UNAVAILABLE", "Run python -m scripts.train --mode fixture first.") from exc
+    path = Path(artifact_dir)
+    try:
+        metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
+        binary = (path / "model.pkl").read_bytes()
+        if metadata.get("artifact_schema_version") != _SCHEMA:
+            raise ValueError("artifact schema")
+        model_id = metadata.get("model_id")
+        identity = {
+            "implementation": metadata.get("implementation"),
+            "turbine_id": metadata.get("turbine_id"),
+            "cutoff": metadata.get("train_cutoff"),
+            "canonical_sha256": metadata.get("canonical_sha256"),
+            "feature_names": metadata.get("feature_names"),
+            "parameters": metadata.get("parameters"),
+            "python_version": metadata.get("python_version"),
+            "library_versions": metadata.get("library_versions"),
+        }
+        expected_id = "sha256:" + _digest(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
+        saved_python = str(metadata.get("python_version", "")).split(".")[:2]
+        running_python = platform.python_version().split(".")[:2]
+        if (metadata.get("turbine_id") not in {"T1", "T2"}
+                or not isinstance(model_id, str)
+                or model_id != expected_id
+                or path.name != model_id.removeprefix("sha256:")
+                or path.parent.name != metadata["turbine_id"]
+                or saved_python != running_python
+                or metadata.get("library_versions", {}).get("scikit_learn") != sklearn.__version__
+                or metadata.get("feature_names") != list(FEATURES)
+                or metadata.get("feature_units") != _UNITS
+                or metadata.get("estimator") != "HistGradientBoostingRegressor"
+                or metadata.get("parameters") != _PARAMETERS
+                or metadata.get("artifact_sha256") != _digest(binary)):
+            raise ValueError("artifact identity or checksum")
+        estimator = pickle.loads(binary)
+        if not isinstance(estimator, HistGradientBoostingRegressor) or not hasattr(estimator, "n_features_in_") or estimator.n_features_in_ != len(FEATURES):
+            raise ValueError("estimator incompatible")
+        return ModelBundle(estimator, metadata)
+    except (OSError, ValueError, TypeError, KeyError, pickle.UnpicklingError, EOFError, AttributeError, ImportError) as exc:
+        raise ForecastError("MODEL_UNAVAILABLE", f"Model artifact unavailable or invalid: {exc}") from exc
 
 
 def predict_power_csv(model: PowerModel, csv_path: Path, *, turbine_id: str, origin: str,
                       horizon_hours: int, expected_sha256: str) -> list[float]:
-    """Primary inference interface. Predictions are computed from the actual CSV file."""
+    """Read exact validated CSV bytes; the agent owns clipping and its diagnostics."""
     from model_input import read_model_input
-    if model.metadata["turbine_id"] != turbine_id:
-        raise ForecastError("MODEL_UNAVAILABLE", "Input CSV turbine does not match the fitted model.")
+    if model.metadata.get("turbine_id") != turbine_id:
+        raise ForecastError("MODEL_UNAVAILABLE", "Input CSV turbine does not match model")
     rows = read_model_input(csv_path, turbine_id=turbine_id, origin=origin,
                             horizon_hours=horizon_hours, expected_sha256=expected_sha256)
-    return predict_power(model, rows)
-
-
-def save_model(model: PowerModel) -> None:
-    directory = artifact_dir() / "models"
-    directory.mkdir(parents=True, exist_ok=True)
-    site = model.metadata["turbine_id"]
-    (directory / f"{site}.pkl").write_bytes(pickle.dumps(model))
-    (directory / f"{site}.json").write_text(json.dumps(model.metadata, indent=2))
-
-
-def load_model(turbine_id: str) -> PowerModel:
-    if turbine_id not in SITE_IDS:
-        raise ForecastError("INVALID_INPUT", "Unknown turbine model.")
-    path = artifact_dir() / "models" / f"{turbine_id}.pkl"
-    try:
-        # Only locally trained artifacts are accepted; never accept uploaded pickle files.
-        fitted = pickle.loads(path.read_bytes())
-    except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ImportError, ValueError) as exc:
-        raise ForecastError("MODEL_UNAVAILABLE", "Run python -m scripts.train --mode fixture first.") from exc
-    if not isinstance(fitted, PowerModel) or fitted.metadata["turbine_id"] != turbine_id:
-        raise ForecastError("MODEL_UNAVAILABLE", "Model artifact does not match the selected turbine.")
-    return fitted
+    return _predict_raw(model, rows).tolist()

@@ -188,3 +188,14 @@ Tests never use paid APIs: the suite clears the key and mocks SDK responses.
 `tests/test_api.py` verifies transport/download/stored-result boundaries;
 `tests/test_explanation.py` verifies grounded payloads, cache and failures.
 Commit compatible increments and coordinate shared schema changes across A/B/C.
+
+## Versioned model artifacts
+
+`load_model(turbine_id)` remains the orchestration boundary. Training writes
+`artifacts/models/<turbine>/<model-hash>/model.pkl` and `metadata.json`, then
+updates `latest.json`. Loading verifies estimator identity, checksum, feature
+units/order and Python/scikit-learn compatibility. Trusted legacy per-turbine
+pickle files remain readable only when no new registry exists; retraining migrates.
+Metadata retains `train_origin` and `features` alongside `train_cutoff` and
+`feature_names`. `predict_power_csv` returns raw finite predictions so the agent
+retains ownership of clipping/counts. The independent diagnostic helper may clip.

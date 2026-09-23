@@ -157,3 +157,25 @@ browser rehearsal remains useful before presentation.
 The current app is a working demo with explicit weather/location stubs, not a
 claim that the full organizer task is complete. See [AGENTS.md](AGENTS.md) for
 working rules and [PLAN.md](PLAN.md) for current scope.
+
+## Интеграция MLmodel
+
+Обучение `python -m scripts.train --mode fixture` теперь также создаёт январскую
+диагностику отдельно для T1/T2: `artifacts/training/T1_metrics.json` и
+`T2_metrics.json`, плюс CSV с фактом и прогнозом. `--skip-validation` пропускает
+только диагностику. Она использует измеренную погоду и не оценивает качество
+реального прогноза погоды на 24/48 часов; baseline заморожен на весь январь.
+
+Модели сохраняются в `artifacts/models/<турбина>/<хэш>/`, активные версии — в
+`latest.json`. Старые локальные `T1.pkl`/`T2.pkl` читаются при отсутствии реестра;
+переобучение переводит проект на новый формат. Внешний контракт
+`load_model("T1")` и обязательный CSV-вход сохранены. После обучения:
+
+```sh
+python -m scripts.smoke_model --models-dir artifacts/models
+```
+
+Команда проверяет восемь синтетических сценариев через реальное чтение CSV.
+
+Проверка интеграции: 50 тестов, сборка React и 8 CSV smoke-сценариев прошли.
+Январский MAE: T1 — 0,02373; T2 — 0,02592 (нормализованные доли, измеренная погода).
