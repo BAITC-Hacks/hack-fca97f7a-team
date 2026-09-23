@@ -1,0 +1,33 @@
+.world-scene{position:absolute;inset:0;overflow:hidden;background:#071016;isolation:isolate}
+.world-renderer,.world-canvas{position:absolute;inset:0;width:100%;height:100%;outline:none}
+.world-renderer{z-index:0}
+.world-renderer:focus-visible{outline:2px solid #bad9cb;outline-offset:-5px}
+.world-canvas{display:block;touch-action:none;cursor:grab}
+.world-canvas.is-dragging{cursor:grabbing}
+.world-marker-layer{position:absolute;inset:0;pointer-events:none;z-index:2}
+.world-marker-leaders{position:absolute;inset:0;overflow:visible;width:100%;height:100%;pointer-events:none}
+.world-marker-leaders line{stroke:rgba(218,238,224,.64);stroke-width:1;visibility:hidden}
+.world-marker{position:absolute;left:0;top:0;min-width:48px;min-height:48px;padding:0;border:0;background:none;color:#e8f3e9;pointer-events:auto;cursor:pointer;visibility:hidden;will-change:transform;z-index:2;isolation:isolate}
+.world-marker-shape{position:absolute;inset:0;display:flex;align-items:center;gap:7px;justify-content:center;transform:translate(-50%,-50%);border:1px solid rgba(230,245,232,.38);border-radius:24px;background:rgba(14,36,34,.84);box-shadow:0 3px 15px rgba(0,0,0,.25);padding:0 13px;min-width:48px;height:36px;transition:background 130ms,scale 130ms;backdrop-filter:blur(12px)}
+.world-marker strong{font-size:11px;letter-spacing:.05em;font-weight:650}
+.world-marker-dot{width:5px;height:5px;flex:none;border-radius:50%;background:#c9e1cb;box-shadow:0 0 0 3px rgba(208,234,211,.10)}
+.world-marker:active .world-marker-shape{scale:.92;background:#315d4f}
+.world-marker:focus-visible{outline:none}
+.world-marker:focus-visible .world-marker-shape{outline:2px solid #ddf8e2;outline-offset:4px}
+.world-marker-selected .world-marker-shape{background:rgba(50,79,59,.93);border-color:rgba(210,233,191,.6)}
+.world-marker-card{position:absolute;left:0;bottom:50px;transform:translateX(-50%) translateY(3px);width:218px;border-radius:14px;border:1px solid rgba(228,241,232,.18);background:rgba(10,25,27,.95);padding:15px;text-align:left;box-shadow:0 12px 28px #0004;display:grid;gap:8px;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 140ms,transform 140ms;font-family:inherit}
+.world-marker-card b{font-size:13px;font-weight:580}.world-marker-card span{font-size:10px;line-height:1.4;color:#b9c8c4;letter-spacing:.025em}
+.world-marker:hover .world-marker-card,.world-marker:focus-visible .world-marker-card{opacity:1;visibility:visible;transform:translateX(-50%)}
+.world-zoom{position:absolute;z-index:3;right:32px;top:46%;display:grid;background:rgba(12,23,27,.52);backdrop-filter:blur(14px);border:1px solid rgba(228,244,237,.16);border-radius:25px;overflow:hidden;box-shadow:0 4px 18px #0001}
+.world-zoom button{appearance:none;border:0;background:none;color:#e4eee9;font-family:inherit;width:46px;height:46px;min-height:44px;font-size:22px;font-weight:300;cursor:pointer;transition:background 120ms,transform 100ms}
+.world-zoom button:hover{background:#ffffff12}.world-zoom button:active{transform:scale(.92);background:#ffffff24}
+.world-zoom button:focus-visible{outline:2px solid #c5ddca;outline-offset:-4px;border-radius:20px}.world-zoom>span{height:1px;width:18px;background:#ffffff1c;justify-self:center}
+.world-attribution{position:absolute;bottom:15px;left:32px;z-index:2;font-size:9px;letter-spacing:.035em;color:rgba(221,232,222,.52);pointer-events:auto;text-shadow:0 1px 4px #0009}
+.world-attribution a{color:inherit;text-decoration:none}.world-attribution a:hover{text-decoration:underline}.world-attribution a:focus-visible{outline:2px solid #c5ddca;outline-offset:4px}
+.world-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#dcebe4;pointer-events:none;background:radial-gradient(ellipse at 65% 50%,#233a42,#071016 75%)}
+.world-fallback-earth{width:min(58vw,68vh);aspect-ratio:1;border-radius:50%;margin-left:22%;background:#193743 url('/scene/earth-blue-marble.jpg') 60% 50%/200% 100%;box-shadow:inset -60px -15px 70px #000a,0 0 28px #466d792e}
+.world-fallback p{position:absolute;bottom:20%;margin-left:20%;font-size:13px;line-height:1.8;text-align:center}.world-fallback p span{font-size:11px;color:#a9bdb6}
+@media(max-width:700px){.world-zoom{right:14px;top:42%;border-radius:23px}.world-zoom button{width:43px;height:44px}.world-attribution{left:18px;bottom:13px;font-size:7px;max-width:70%;white-space:nowrap}.world-attribution-detail{display:none}.world-marker-card{width:190px}.world-fallback-earth{margin-left:0;width:80vw}.world-fallback p{margin-left:0;bottom:32%;padding:0 24px}}
+@media(prefers-reduced-motion:reduce){.world-marker-shape,.world-marker-card,.world-zoom button{transition:none}.world-marker:active .world-marker-shape,.world-zoom button:active{transform:none;scale:1}}
+@media(prefers-reduced-transparency:reduce){.world-marker-shape,.world-zoom{background:#132723;backdrop-filter:none}.world-marker-card{background:#102022}}
+@media(prefers-contrast:more){.world-marker-shape,.world-zoom{background:#101e1a;border-color:#c7dacf}.world-attribution{color:#dcece2}}

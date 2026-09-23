@@ -30,7 +30,7 @@ export const ru = {
   result: '02 / РЕЗУЛЬТАТ ПРОГНОЗА', ready: '● ГОТОВО',
   meanPower: 'Средняя мощность', peakPower: 'Максимум', lowestPower: 'Минимум', normalized: 'нормализованная мощность',
   chart: 'Почасовая нормализованная мощность', forecast: 'Прогноз',
-  chartAria: 'Почасовой прогноз нормализованной мощности и базовый прогноз',
+  chartAria: 'Почасовой прогноз нормализованной мощности',
   downloadForecast: 'Скачать прогноз CSV', downloadInput: 'Скачать входной CSV', modelInput: 'Входные данные модели', rows: 'строк',
   analysis: '03 / АНАЛИЗ', analysisTitle: 'Анализ и чат', aiExplanation: 'Объяснение ИИ', computedExplanation: 'Расчётное объяснение — ИИ недоступен',
   explanationLoading: 'Готовим объяснение…', explanationUnavailable: 'Не удалось получить объяснение',
