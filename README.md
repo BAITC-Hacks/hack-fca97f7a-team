@@ -117,7 +117,8 @@ training cutoff and future-data isolation, weather chronology/coverage, cache
 invalidation, forecast bounds, summary fallback, marker identity, and stale UI
 results. Streamlit AppTest simulates UI events; it does not execute Leaflet JS.
 
-Real Chromium checks additionally verified selector-driven forecast generation,
-CSV download and next-day overlap comparison without JavaScript page errors.
+Real Chromium checks additionally verified direct T1/T2 marker selection, clearing
+old results when switching turbines, selector-driven forecast generation, CSV
+download and next-day overlap comparison without JavaScript page errors.
 Playwright was used only as a development verification tool; it is not in the
 application requirements and is not needed to launch the demo.
