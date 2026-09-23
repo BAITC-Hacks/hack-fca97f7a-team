@@ -1,4 +1,4 @@
-"""Registered demo sites and explicitly synthetic, dated weather runs."""
+"""User-supplied turbine locations and explicitly synthetic, dated weather runs."""
 from __future__ import annotations
 
 import hashlib
@@ -8,25 +8,23 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
 
 import httpx
 
 from contracts import ForecastError, artifact_dir, expected_hours, fingerprint, fixture_dir, iso, next_live_origin, utc_now, utc_time
 
 SITES = (
-    {"turbine_id": "T1", "latitude": 0.0, "longitude": 0.0,
-     "timezone": "Asia/Almaty", "coordinate_status": "fixture"},
-    {"turbine_id": "T2", "latitude": 0.0, "longitude": 0.03,
-     "timezone": "Asia/Almaty", "coordinate_status": "fixture"},
-)
-
-
-ARCHIVE_SITES = (
     {"turbine_id": "T1", "latitude": 43.645150, "longitude": 78.535604,
-     "timezone": "Asia/Almaty", "coordinate_status": "organizer-supplied"},
+     "timezone": "Asia/Almaty", "coordinate_status": "user_provided",
+     "coordinate_source": "https://maps.app.goo.gl/iN6svMt69D5qRpFU9"},
     {"turbine_id": "T2", "latitude": 43.643198, "longitude": 78.538828,
-     "timezone": "Asia/Almaty", "coordinate_status": "organizer-supplied"},
+     "timezone": "Asia/Almaty", "coordinate_status": "user_provided",
+     "coordinate_source": "https://maps.app.goo.gl/8UQMwsYavY6nLvFY8"},
 )
+
+
+ARCHIVE_SITES = SITES
 ARCHIVE_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 LIVE_URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "ecmwf_ifs"
@@ -126,6 +124,55 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
         raise _unavailable("Погодный API недоступен; повторите запрос позже.") from exc
     except (UnicodeError, ValueError) as exc:
         raise ForecastError("DATA_INVALID", "Ответ погодного API имеет неверный формат.") from exc
+    rows, grid_lat, grid_lon, by_hour = _parse_forecast(data, origin, horizon_hours)
+    canonical_digest = _forecast_digest(site, record, grid_lat, grid_lon, by_hour)
+    if canonical_digest != record["forecast_sha256"]:
+        raise _unavailable("Погодный прогноз изменился по сравнению с проверенным выпуском; проверьте свидетельство.")
+    _save_raw(raw, digest)
+    return {"manifest": {"turbine_id": site["turbine_id"], "run_id": record["run"],
+            "provider": "Open-Meteo Single Runs / ecmwf_ifs", "source_url": ARCHIVE_URL,
+            "initialized_at": record["initialized_at"], "available_at": record["available_at"],
+            "availability_basis": record["availability_basis"] + ":" + record["evidence_ref"],
+            "provenance_status": "verified", "raw_sha256": digest,
+            "forecast_sha256": canonical_digest, "interpolation": "none",
+            "wind_height_m": 10, "wind_height_status": "proxy_not_hub_height",
+            "grid_latitude": data.get("latitude"), "grid_longitude": data.get("longitude")}, "rows": rows}
+
+
+def load_sites(mode: str = "fixture") -> list[dict]:
+    if mode not in ("fixture", "archive", "live"):
+        raise ForecastError("INVALID_INPUT", "Режим должен быть live, fixture или archive.")
+    return [dict(site) for site in SITES]
+
+
+def fetch_weather(site: dict, origin: str, horizon_hours: int, mode: str) -> dict:
+    if mode not in ("fixture", "archive", "live"):
+        raise ForecastError("INVALID_INPUT", "Режим должен быть live, fixture или archive.")
+    if not isinstance(site, dict) or site not in (ARCHIVE_SITES if mode == "archive" else SITES):
+        raise ForecastError("INVALID_INPUT", "Выберите зарегистрированную турбину для указанного режима.")
+    if type(horizon_hours) is not int or horizon_hours not in (24, 48):
+        raise ForecastError("INVALID_INPUT", "Горизонт должен составлять 24 или 48 часов.")
+    parsed = utc_time(origin)
+    if parsed.minute or parsed.second or parsed.microsecond or iso(parsed) != origin:
+        raise ForecastError("INVALID_INPUT", "Укажите начало прогноза по целому часу UTC.")
+    if mode == "live":
+        return _live_weather(site, origin, horizon_hours)
+    if mode == "archive":
+        return _archive_weather(site, origin, horizon_hours)
+    name = {"2026-01-31T18:00:00Z": "r1", "2026-02-01T18:00:00Z": "r2"}.get(origin)
+    if name is None:
+        raise ForecastError("WEATHER_UNAVAILABLE", "Нет демонстрационного погодного выпуска для этой даты; выберите 31 января или 1 февраля.")
+    path = fixture_dir() / f"{site['turbine_id']}-{name}.json"
+    try:
+        bundle = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise ForecastError("WEATHER_UNAVAILABLE", "Демонстрационная погода отсутствует; выполните python -m scripts.make_fixtures.") from exc
+    wanted = set(expected_hours(origin, horizon_hours))
+    return {"manifest": bundle["manifest"],
+            "rows": [row for row in bundle["rows"] if row.get("valid_at") in wanted]}
+
+
+def _parse_forecast(data, origin, horizon_hours):
     try:
         units = data["hourly_units"]
         hours = data["hourly"]
@@ -150,11 +197,12 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
                 raise ValueError("duplicate or invalid measurement")
             by_hour[stamp] = {"valid_at": stamp, "wind_speed_ms": float(wind), "temperature_c": float(temp)}
         rows = [by_hour[hour] for hour in expected_hours(origin, horizon_hours)]
-        canonical_digest = _forecast_digest(site, record, grid_lat, grid_lon, by_hour)
     except (KeyError, TypeError, ValueError) as exc:
         raise ForecastError("DATA_INVALID", "Погодный ответ содержит пропуски, дубли, неверные единицы или значения.") from exc
-    if canonical_digest != record["forecast_sha256"]:
-        raise _unavailable("Погодный прогноз изменился по сравнению с проверенным выпуском; проверьте свидетельство.")
+    return rows, grid_lat, grid_lon, by_hour
+
+
+def _save_raw(raw, digest):
     target = artifact_dir() / "weather_raw" / f"{digest}.json"
     temporary = None
     try:
@@ -181,14 +229,6 @@ def _archive_weather(site: dict, origin: str, horizon_hours: int) -> dict:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    return {"manifest": {"turbine_id": site["turbine_id"], "run_id": record["run"],
-            "provider": "Open-Meteo Single Runs / ecmwf_ifs", "source_url": ARCHIVE_URL,
-            "initialized_at": record["initialized_at"], "available_at": record["available_at"],
-            "availability_basis": record["availability_basis"] + ":" + record["evidence_ref"],
-            "provenance_status": "verified", "raw_sha256": digest,
-            "forecast_sha256": canonical_digest, "interpolation": "none",
-            "wind_height_m": 10, "wind_height_status": "proxy_not_hub_height",
-            "grid_latitude": data.get("latitude"), "grid_longitude": data.get("longitude")}, "rows": rows}
 
 
 def _live_weather(site: dict, origin: str, horizon_hours: int) -> dict:

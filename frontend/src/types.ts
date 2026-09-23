@@ -6,6 +6,7 @@ export interface Site {
   longitude: number
   timezone: string
   coordinate_status: string
+  coordinate_source?: string
 }
 
 export interface ForecastRequest {
@@ -75,4 +76,23 @@ export interface Explanation {
   forecast_fingerprint: string
   warning: string | null
   model?: string
+}
+
+export interface TimeSelection {
+  start: string
+  end: string
+}
+
+export interface ToolResult {
+  tool: string
+  data: Record<string, unknown>
+  text: string
+  selection?: TimeSelection | null
+  table?: { columns: string[], rows: string[][] }
+}
+
+export interface QuestionAnswer extends Explanation {
+  conversation_id: string
+  selection?: TimeSelection | null
+  tool_results?: ToolResult[]
 }

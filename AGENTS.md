@@ -56,14 +56,21 @@ let the LLM generate or overwrite numerical power predictions. Keys stay server-
 - Power is normalized [0,1], not MW/MWh. No farm total without capacities and no
   accuracy claim without held-out truth. Report clipping and data exclusions.
 
-Fixture weather and coordinates remain synthetic and labeled. The separate `live`
-mode fetches current Open-Meteo forecasts at organizer-supplied coordinates;
-its origin is generated server-side and it is not a substitute for historical
-as-issued data. `archive` stays evidence-gated. OpenAI is a real adapter; missing
-keys/failure must be labeled fallback. Do not claim full organizer compliance
-until archive weather and replay work.
+Fixture weather is synthetic and labeled; all three modes use the user's mapped
+T1/T2 coordinates (`coordinate_status=user_provided`) and source links in
+CONTRACTS.md. The separate `live` mode fetches current Open-Meteo forecasts;
+its origin is generated server-side and it is not historical as-issued evidence.
+`archive` stays evidence-gated. OpenAI failures use a labeled fallback. Do not
+claim full organizer compliance until archive weather and replay work.
 
 ## Ownership and how to make changes
+
+For independent implementation tasks, the primary agent orchestrates: delegate
+bounded coding work to faster subagents in parallel, then perform final integration
+and verification itself. Prefer `gpt-6-sol` for coding and `gpt-6-luna` for bounded
+checks when appropriate. This is a project work rule requested by the user; it
+does not override module ownership, the current task scope, or the requirement to
+coordinate shared contracts and preserve concurrent edits.
 
 | Stream | Owns | Change here |
 |---|---|---|
@@ -117,3 +124,10 @@ Commit working increments regularly as explicitly requested. Keep changes scoped
 never push unless asked. Preserve concurrent edits. Update README/CONTRACTS when
 interfaces or launch commands change. Report real checks separately from mocked
 ones and list remaining stubs accurately.
+
+## Live weather mode
+
+User explicitly requested actual current weather. React defaults to `live`;
+server chooses the current UTC hour and fetches Open-Meteo Forecast without
+archive evidence. Preserve separate fixture/archive semantics. Live provenance
+records retrieval time, not an invented initialization/publication time.

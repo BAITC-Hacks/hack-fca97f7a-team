@@ -4,10 +4,13 @@ from __future__ import annotations
 import copy
 import contracts
 import hashlib
+import json
 import os
 import re
+import secrets
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal
@@ -42,6 +45,20 @@ app.add_middleware(
 _FORECASTS: OrderedDict[str, dict] = OrderedDict()
 _FORECASTS_LOCK = threading.RLock()
 _MAX_FORECASTS = 64
+_MAX_CONVERSATIONS = 128
+_MAX_HISTORY_MESSAGES = 10
+
+
+@dataclass
+class Conversation:
+    forecast_id: str
+    messages: list[dict] = field(default_factory=list)
+    selection: dict | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+# Both stores use the same lock so forecast eviction also removes its dialogs.
+_CONVERSATIONS: OrderedDict[str, Conversation] = OrderedDict()
 
 
 class ForecastBody(BaseModel):
@@ -69,6 +86,7 @@ class ExplanationBody(BaseModel):
 
 class QuestionBody(ExplanationBody):
     question: StrictStr = Field(min_length=1, max_length=2000)
+    conversation_id: StrictStr | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
     @field_validator("question")
     @classmethod
@@ -149,7 +167,10 @@ def create_forecast(body: ForecastBody):
         _FORECASTS[forecast_id] = stored
         _FORECASTS.move_to_end(forecast_id)
         while len(_FORECASTS) > _MAX_FORECASTS:
-            _FORECASTS.popitem(last=False)
+            evicted_id, _ = _FORECASTS.popitem(last=False)
+            for token, conversation in list(_CONVERSATIONS.items()):
+                if conversation.forecast_id == evicted_id:
+                    del _CONVERSATIONS[token]
     return {**copy.deepcopy(result), "forecast_id": forecast_id}
 
 
@@ -222,10 +243,65 @@ def explain_forecast(forecast_id: str, body: ExplanationBody):
 @app.post("/api/forecasts/{forecast_id}/questions")
 def ask_forecast(forecast_id: str, body: QuestionBody):
     result = _get_forecast(forecast_id)
+    with _FORECASTS_LOCK:
+        token = body.conversation_id
+        if token is None:
+            token = secrets.token_hex(16)
+            conversation = Conversation(forecast_id=forecast_id)
+            _CONVERSATIONS[token] = conversation
+            while len(_CONVERSATIONS) > _MAX_CONVERSATIONS:
+                _CONVERSATIONS.popitem(last=False)
+        else:
+            conversation = _CONVERSATIONS.get(token)
+            if conversation is None or conversation.forecast_id != forecast_id:
+                return _error(404, "CONVERSATION_NOT_FOUND", "Диалог не найден для этого прогноза; начните новый разговор.")
+            _CONVERSATIONS.move_to_end(token)
+        if not conversation.lock.acquire(blocking=False):
+            return _error(409, "CONVERSATION_BUSY", "Дождитесь ответа на предыдущий вопрос.")
     try:
-        return answer_question(result, body.question, backend=body.backend)
+        answer = answer_question(result, body.question, backend=body.backend,
+                                 history=copy.deepcopy(conversation.messages),
+                                 selection=copy.deepcopy(conversation.selection))
+        with _FORECASTS_LOCK:
+            if forecast_id not in _FORECASTS:
+                return _error(404, "NOT_FOUND", "Прогноз не найден; создайте его заново.")
+            if _CONVERSATIONS.get(token) is not conversation:
+                return _error(404, "CONVERSATION_NOT_FOUND", "Диалог не найден для этого прогноза; начните новый разговор.")
+            conversation.messages.extend([
+                {"role": "user", "content": body.question},
+                {"role": "assistant", "content": _answer_memory(answer)},
+            ])
+            conversation.messages = conversation.messages[-_MAX_HISTORY_MESSAGES:]
+            if "selection" in answer:
+                conversation.selection = copy.deepcopy(answer["selection"])
+        return {**answer, "conversation_id": token}
     except Exception:
         return _error(500, "EXPLANATION_FAILED", "Не удалось ответить на вопрос; повторите запрос.")
+    finally:
+        conversation.lock.release()
+
+
+def _answer_memory(answer: dict) -> str:
+    """Keep the table's references even when LLM prose does not repeat its cells."""
+    facts = []
+    for tool in answer.get("tool_results", [])[-4:]:
+        data = tool.get("data", {})
+        compact = {key: value for key, value in data.items() if key not in ("hours", "changes")}
+        if tool.get("tool") == "best_hours" and "hours" in data:
+            compact["ranked_hours"] = [[hour["valid_at"], hour["power_norm"]] for hour in data["hours"]]
+        if "changes" in data:
+            compact["changes"] = [[change["from"], change["to"], change["delta_power_norm"]]
+                                  for change in data["changes"]]
+        facts.append({"tool": tool["tool"], "data": compact})
+    if not facts:
+        return answer["text"][:6000]
+    # The final tool contains the active comparison/selection. Retain complete
+    # JSON rather than cutting a timestamp or number at the message limit.
+    encoded = json.dumps(facts, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    if len(encoded) > 4500:
+        encoded = json.dumps(facts[-1:], ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    suffix = "\nРассчитанные Python факты: " + encoded
+    return answer["text"][:max(0, 6000 - len(suffix))] + suffix
 
 
 @app.api_route("/api/{api_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

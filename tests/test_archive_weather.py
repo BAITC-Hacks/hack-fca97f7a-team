@@ -181,12 +181,12 @@ def test_raw_capture_is_atomic_and_existing_mismatch_blocks(setup_archive, monke
     assert target.read_bytes() == b"interrupted or poisoned prior capture"
 
 
-def test_raw_capture_failed_atomic_replace_cleans_temp(setup_archive, monkeypatch):
+def test_raw_capture_failed_exclusive_link_cleans_temp(setup_archive, monkeypatch):
     site, data, record, calls, save = setup_archive
     from contracts import artifact_dir
-    def fail_replace(*args):
+    def fail_link(*args):
         raise OSError("internal-path-secret")
-    monkeypatch.setattr(weather.os, "replace", fail_replace)
+    monkeypatch.setattr(weather.os, "link", fail_link)
     with pytest.raises(ForecastError) as exc:
         weather.fetch_weather(site, FIRST_ORIGIN, 24, "archive")
     assert exc.value.code == "WEATHER_UNAVAILABLE"
@@ -201,7 +201,7 @@ def test_no_manifest_or_fixture_site_never_calls_network(setup_archive, monkeypa
     with pytest.raises(ForecastError, match="Архив недоступен"):
         weather.fetch_weather(site, FIRST_ORIGIN, 24, "archive")
     with pytest.raises(ForecastError) as exc:
-        weather.fetch_weather(weather.load_sites("fixture")[0], FIRST_ORIGIN, 24, "archive")
+        weather.fetch_weather({"turbine_id": "T1", "latitude": 0}, FIRST_ORIGIN, 24, "archive")
     assert exc.value.code == "INVALID_INPUT" and not calls
 
 
@@ -233,10 +233,10 @@ def test_agent_real_csv_and_fitted_model(setup_archive, monkeypatch):
     agent._CACHE.clear()
     request = {"turbine_id": "T1", "origin": FIRST_ORIGIN, "horizon_hours": 24, "mode": "archive"}
     from model import load_model
-    from contracts import ROOT
-    import model
-    monkeypatch.setattr(model, "artifact_dir", lambda: ROOT / "artifacts")  # fitted local model; CSV stays temporary
-    result = agent.run_forecast(request, model_loader=load_model)
+    with monkeypatch.context() as model_environment:
+        model_environment.delenv("ARTIFACT_DIR", raising=False)
+        fitted = load_model("T1")
+    result = agent.run_forecast(request, model_loader=lambda turbine: fitted)
     assert result["status"] == "ok", result
     assert result["model_input"]["row_count"] == 24
     from model_input import read_model_input

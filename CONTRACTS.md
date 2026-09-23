@@ -30,7 +30,7 @@ Backend: `api.py`; frontend transport: `frontend/src/api.ts`; TypeScript DTOs:
 | `GET /api/forecasts/{id}/download?kind=forecast` | stored forecast ID | output CSV attachment |
 | `GET /api/forecasts/{id}/download?kind=model-input` | stored forecast ID | exact CSV consumed by the model, hash verified |
 | `POST /api/forecasts/{id}/explanation` | `{"backend":"llm"}` (or template) | explanation below |
-| `POST /api/forecasts/{id}/questions` | `{"question":"When is output lowest?","backend":"llm"}` | answer using this stored forecast |
+| `POST /api/forecasts/{id}/questions` | `{"question":"А какой там ветер?","backend":"llm","conversation_id":"optional 32-character hex token"}` | answer using this stored forecast and server-owned conversation |
 
 Fixture/archive requests retain their explicit origin; live requests **omit** origin (sending it in live returns HTTP 400 `INVALID_INPUT`):
 
@@ -64,6 +64,11 @@ Success includes `status=ok`, those request fields, `timezone`, `run_id`,
 ```
 
 Each hour is `{valid_at,lead_hour,wind_speed_ms,temperature_c,power_norm,baseline_norm}`.
+`model_context` contains an allowlist of the loaded model's training metadata:
+turbine/model identity, estimator, features/units, source description, training row
+count and cutoff, aggregation/time assumptions when recorded, plus explicit
+limitations. Absent metadata remains absent. Raw training CSVs, paths and secrets
+are not exposed. This context participates in the forecast fingerprint.
 Analysis contains `peak_power_norm`, `peak_at`, `min_power_norm`, `min_at`,
 `clipped_count`, and `warnings`. Output is normalized power, not MW/MWh.
 
@@ -71,6 +76,27 @@ Explanation/answer: `{text,backend,forecast_fingerprint,warning,model?}`.
 `backend=llm` means an actual OpenAI response; fallback is always `template`
 with a reason. React renders numeric output before requesting the explanation.
 It must check the explanation fingerprint and ignore responses from stale inputs.
+
+Question responses additionally contain `conversation_id`, `selection` (a UTC
+half-open `{start,end}` period or null) and `tool_results`. Each tool result has
+`tool`, `data`, `text`, optional `selection`, and optional
+`table: {columns: string[], rows: string[][]}`. Table cells are formatted by Python
+in Russian with explicit local timezone; React renders them without recalculating.
+Omit `conversation_id` to start a new dialog, including after regenerating an
+identical forecast. Subsequent questions pass the returned token, bound to exactly
+one forecast ID. The server stores the last 10 user/assistant messages and the
+selected period; clients cannot submit history, selections or forecast numbers.
+Assistant history also retains compact Python tool facts and ranked hour references,
+so a follow-up can refer to table entries even when prose did not repeat them.
+React clears its token and displayed conversation whenever inputs change or a new
+forecast is requested. Stale responses must not restore old conversation state.
+
+There are at most 128 dialogs. Forecast eviction removes its dialogs; dialog
+eviction/restart or a token bound to another forecast returns HTTP 404
+`CONVERSATION_NOT_FOUND`. React clears the expired dialog and lets the user retry
+the question as a new dialog. Missing forecast remains 404 `NOT_FOUND` and requires
+regeneration. Concurrent questions for one dialog return 409 `CONVERSATION_BUSY`;
+history updates are atomic and different dialogs may run independently.
 
 Errors use HTTP 400/422/503/404/500 as appropriate and
 `{status:"error",code,message,trace:[]}`. Unexpected tool/program failures
@@ -102,11 +128,17 @@ Live sets `fetched_at=available_at` to the response-completion UTC timestamp,
 `availability_basis=response_received`, `provenance_status=live`, and enforces
 `available_at <= origin`. This is current weather, **not** a historical as-issued run.
 Archive mode requires verified provenance. Fixture mode retains two synthetic
-runs per turbine and fictional locations; `load_sites("archive")` returns the
-organizer-supplied coordinates T1 (43.645150, 78.535604) / T2 (43.643198,
-78.538828), timezone Asia/Almaty, `coordinate_status=organizer-supplied`.
+runs per turbine. Both modes use the same user-provided coordinates and source links.
 Coordinates establish neither engineering identity nor weather eligibility.
 See [Open-Meteo verification](docs/open-meteo-verification.md).
+
+Site coordinates were supplied and mapped by the user: T1 is
+`43.645150, 78.535604` ([source](https://maps.app.goo.gl/iN6svMt69D5qRpFU9));
+T2 is `43.643198, 78.538828` ([source](https://maps.app.goo.gl/8UQMwsYavY6nLvFY8)).
+`coordinate_status=user_provided` describes this source; `coordinate_source` is
+the original Maps URL. Sites are available in all three modes, while archive weather
+requires verified run evidence. The fixture weather is still synthetic. Coordinates are
+included in the existing forecast cache identity through the site metadata.
 
 The archive adapter requests `single-runs-api.open-meteo.com/v1/forecast`,
 `models=ecmwf_ifs`, one immutable UTC `run`, hourly `temperature_2m` and
@@ -207,6 +239,12 @@ predict_power_csv(model, csv_path, *, turbine_id, origin,
 `PowerModel.metadata` retains turbine ID, model ID, feature list, training origin,
 last completed training interval and frozen persistence baseline. The agent
 requires matching turbine and a training cutoff no later than the first origin.
+Locally generated versioned model artifacts also record the source and canonical
+data hashes, feature order and units, fit parameters and environment versions.
+`load_model(turbine_id)` remains the public loader and checks the selected turbine;
+regenerate artifacts through `python -m scripts.train --mode fixture` after
+changing ingestion or features. See [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md)
+for measured-source audits and unconfirmed weather feature provenance.
 CSV inference returns one finite value per row in the same order. The agent clamps
 to [0,1] and reports how many values needed clamping.
 
@@ -233,19 +271,34 @@ LLM prose must not overwrite predictions, uncertainty, or provenance.
 
 ```python
 summarize_forecast(result, backend="template") -> dict
-answer_question(result, question, backend="llm") -> dict
+answer_question(result, question, backend="llm", *, history=None, selection=None) -> dict
 ```
 
 FastAPI supplies a server-stored successful result, never client-authored power
-values. The adapter sends only generated forecast context and computed facts to
-OpenAI. Source training CSVs and API keys are not included in prompts. Six-hour
-windows are calculated locally before prose generation. Unsupported local questions
-return a limitation rather than fabricated answers.
+values. The adapter sends generated forecast/model context, up to 10 server-stored
+messages and the selected period to OpenAI. Source training CSVs and API keys are
+not included in prompts. OpenAI selects strict function tools in `forecast_tools.py`:
+`best_hours(count,contiguous,order)`, `period_details(start,end)`,
+`average_power(start,end)`, `compare_periods(start,end,comparison_start,comparison_end)`
+and `power_changes(threshold,direction)`. All arithmetic uses stored forecast hours
+in Python. Periods have UTC hourly inclusive starts and exclusive ends; missing
+hours, invalid units and out-of-range periods are rejected. Null period bounds use
+the current selection; null comparison bounds mean the following equal-length
+period. Scattered ranked hours do not establish a continuous selected period.
+
+The Responses function-calling loop is bounded to 3 API calls and 4 tool calls per
+question and returns outputs with their matching `call_id`. The LLM explains
+computed facts, never writes predictions. Ambiguous timing requests ask for an hour
+or continuous period; energy questions disclose that MW capacity is unknown.
+Weather/power co-movement does not establish a physical cause, and 10 m wind does
+not establish parity with historical sensor/hub height. Missing keys or failed
+generation retain Python-computed answers and tables, explicitly labeled fallback.
+Unsupported local questions return a limitation rather than fabricated answers.
 
 OpenAI uses `OPENAI_API_KEY`, `OPENAI_MODEL` and the Responses API, bounded by an
-8-second timeout and no automatic retries. Missing keys/provider failures return
+8-second timeout per API call and no automatic retries. Missing keys/provider failures return
 computed prose with an explicit warning. Successful prose is cached by forecast
-fingerprint, model, prompt version and question. The UI labels the actual backend.
+fingerprint, model, prompt version, question, history and selected period. The UI labels the actual backend.
 
 To change provider: modify the adapter/client factory here, preserving return fields
 and failure behavior. Do not put provider calls or credentials in frontend code.
@@ -261,4 +314,19 @@ Tests never use paid APIs: the suite clears the key and mocks SDK responses.
 `tests/test_model_input.py` verifies real CSV roundtrips/integrity;
 `tests/test_api.py` verifies transport/download/stored-result boundaries;
 `tests/test_explanation.py` verifies grounded payloads, cache and failures.
+`tests/test_forecast_tools.py` checks independent numeric examples and period
+boundaries; `tests/test_conversation_api.py` checks the three-question dialog,
+history limits, stored table references, forecast isolation, eviction and concurrent
+requests. Browser smoke checks use mocked API responses and no paid calls.
 Commit compatible increments and coordinate shared schema changes across A/B/C.
+
+## Versioned model artifacts
+
+`load_model(turbine_id)` remains the orchestration boundary. Training writes
+`artifacts/models/<turbine>/<model-hash>/model.pkl` and `metadata.json`, then
+updates `latest.json`. Loading verifies estimator identity, checksum, feature
+units/order and Python/scikit-learn compatibility. Trusted legacy per-turbine
+pickle files remain readable only when no new registry exists; retraining migrates.
+Metadata retains `train_origin` and `features` alongside `train_cutoff` and
+`feature_names`. `predict_power_csv` returns raw finite predictions so the agent
+retains ownership of clipping/counts. The independent diagnostic helper may clip.

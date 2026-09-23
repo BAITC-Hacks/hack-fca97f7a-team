@@ -19,13 +19,14 @@ This supersedes the earlier Streamlit-first implementation brief.
 - Output is normalized power [0,1]. Capacity/normalization denominator is unknown.
 - Freeze models before January 31, 2026 18:00 UTC (23:00 local), using completed
   hours only. Forecast starts at origin+1h, February 1 midnight local.
-- Real numeric coordinates and archived weather provenance remain unverified.
-  Current map markers/weather are labeled fixtures; do not claim archive compliance.
+- Real numeric coordinates and T1/T2 mapping were supplied by the user through
+  Google Maps (see CONTRACTS.md). Weather remains a labeled fixture; archived
+  weather provenance is still unavailable.
 
 ## 3. Primary Demo
 
 Select T1/T2 on the React map, choose January 31 and a 48-hour horizon, and click
-Predict generation. FastAPI orchestrates weather validation, CSV creation, actual
+«Сформировать прогноз». FastAPI orchestrates weather validation, CSV creation, actual
 CSV-based power inference and numeric analysis. The user sees the table/chart,
 can download the exact model input, and then sees an OpenAI explanation.
 Ask which six-hour window has the highest output; the backend computes the window
@@ -51,14 +52,14 @@ scoped questions, visible stubs, tests and documented module boundaries.
 
 ### Mock Initially
 
-Weather API and unresolved coordinates. Computed prose only when OpenAI is absent
+Weather API. Computed prose only when OpenAI is absent
 or fails; never call that fallback an LLM response. Real regressors use separate
 real turbine histories.
 
 ### Later If Time
 
 Verified archive retrieval, full February batch replay, held-out accuracy metrics,
-real coordinates, improved forecast-feature training and calibrated uncertainty.
+improved forecast-feature training and calibrated uncertainty.
 
 ### Explicitly Cut
 
@@ -168,6 +169,6 @@ working demo while completing real archive requirements.
 flow works, OpenAI adapter is wired, fallback is honest, errors/downloads tested,
 module change instructions documented, code committed. Verification is in README.
 
-**Full organizer submission remains:** verified real coordinates/as-issued weather,
+**Full organizer submission remains:** verified as-issued weather for the supplied sites,
 28 daily origins for both turbines (2,688 48-hour rows including March spillover),
 February coverage checks, reproducible replay, and accuracy only if truth arrives.

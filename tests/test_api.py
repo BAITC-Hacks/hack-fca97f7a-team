@@ -23,7 +23,10 @@ def test_health_and_sites_do_not_expose_credentials(monkeypatch):
     assert response.json() == {"status": "ok", "llm_configured": True, "summary_backend": "llm"}
     assert "test-secret-value" not in response.text
     assert client.get("/api/sites?mode=fixture").json()["sites"][0]["turbine_id"] == "T1"
-    assert [site["turbine_id"] for site in client.get("/api/sites?mode=archive").json()["sites"]] == ["T1", "T2"]
+    sites = client.get("/api/sites?mode=archive").json()["sites"]
+    assert [site["turbine_id"] for site in sites] == ["T1", "T2"]
+    assert sites[0]["latitude"] == 43.645150
+    assert sites[0]["coordinate_status"] == "user_provided"
 
 
 def test_forecast_runs_core_and_downloads_forecast_csv():
@@ -137,7 +140,7 @@ def test_questions_use_stored_forecast_without_requiring_api_key(monkeypatch):
     created = client.post("/api/forecasts", json=VALID).json()
     seen = []
 
-    def answer(result, question, backend):
+    def answer(result, question, backend, *, history=None, selection=None):
         seen.append((result, question, backend))
         return {"text": "grounded answer", "backend": "template",
                 "forecast_fingerprint": result["fingerprint"], "warning": None}

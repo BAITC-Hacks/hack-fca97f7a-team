@@ -46,7 +46,7 @@ def test_ui_forecast_update_and_stale_results(ui):
 
 def test_marker_identity_and_background_click(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "fixture")
-    event = {"last_object_clicked": {"lat": 0, "lng": 0.03}}
+    event = {"last_object_clicked": {"lat": 43.643198, "lng": 78.538828}}
     monkeypatch.setattr("streamlit_folium.st_folium", lambda *a, **k: event)
     app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
     assert not app.exception

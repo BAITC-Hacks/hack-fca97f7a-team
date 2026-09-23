@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet'
-import { askQuestion, createForecast, downloadUrl, explainForecast, getSites } from './api'
-import type { Explanation, ForecastHour, ForecastRequest, ForecastResult, Site, WeatherMode } from './types'
+import { ApiFailure, askQuestion, createForecast, downloadCsv, explainForecast, getSites } from './api'
+import type { Explanation, ForecastRequest, ForecastResult, QuestionAnswer, Site, WeatherMode } from './types'
+import { ru, percent, decimal, signedPoints, localTime, fieldLabel, statusLabel, stepLabel, provenanceLabel, coordinateLabel, provenanceValue, warningLabel, traceDetail } from './ru'
+import PowerChart from './PowerChart'
+import SiteMap from './SiteMap'
+import { saveBlob } from './chartExport'
 
 const FIRST_DATE = '2026-01-31'
 const LOCAL_ZONE = 'Asia/Almaty'
@@ -17,97 +20,10 @@ function nextDate(date: string): string {
   return day.toISOString().slice(0, 10)
 }
 
-function localTime(stamp: string): string {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: LOCAL_ZONE, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(stamp))
-}
-
-const decimal = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-function pct(value: number): string { return `${decimal.format(value * 100)}%` }
-
-const provenanceLabels: Record<string, string> = {
-  run_id: 'Запуск погоды', provider: 'Поставщик погоды', source_url: 'Источник',
-  initialized_at: 'Время выпуска', available_at: 'Время доступности',
-  fetched_at: 'Время получения', availability_basis: 'Основание доступности',
-  provenance_status: 'Статус происхождения', raw_sha256: 'Контрольная сумма ответа',
-  forecast_sha256: 'Контрольная сумма прогноза', interpolation: 'Интерполяция',
-  wind_height_m: 'Высота ветра, м', wind_height_status: 'Статус высоты ветра',
-  grid_latitude: 'Широта сетки', grid_longitude: 'Долгота сетки',
-}
-const stepLabels: Record<string, string> = {
-  validate_request: 'Проверка запроса', resolve_site: 'Выбор турбины', fetch_weather: 'Получение погоды',
-  validate_weather: 'Проверка погоды', prepare_features: 'Подготовка признаков',
-  write_model_input_csv: 'Создание входного CSV', load_model: 'Загрузка модели',
-  predict_power: 'Расчёт мощности', analyze_result: 'Анализ результата', error: 'Ошибка',
-}
-const stepDetails: Record<string, string> = {
-  'registered request shape and UTC origin': 'Проверены параметры запроса и время UTC',
-  'organizer-supplied coordinates': 'Координаты предоставлены организаторами',
-  'fixture coordinates': 'Условные координаты',
-  'origin elapsed during retrieval': 'Начало прогноза наступило во время получения погоды',
-  'weather received': 'Прогноз погоды получен',
-  'availability, provenance and complete hourly coverage': 'Проверены доступность, происхождение и полнота почасовых данных',
-  'same validated content': 'Ранее проверенный набор данных',
-  'peak, minimum and clipping computed': 'Рассчитаны максимум, минимум и ограничения диапазона',
-}
-function stepDetail(detail: string): string {
-  if (detail in stepDetails) return stepDetails[detail]
-  if (/^\d+ finite wind and temperature pairs$/.test(detail)) return `${detail.split(' ')[0]} конечных пар значений ветра и температуры`
-  if (/^\d+ normalized hourly predictions$/.test(detail)) return `${detail.split(' ')[0]} почасовых прогнозов нормализованной мощности`
-  if (/^\d+ rows · /.test(detail)) return detail.replace(' rows · ', ' строк · ')
-  if (/^transport attempt \d+: /.test(detail)) return detail.replace('transport attempt ', 'Попытка обращения к погодному сервису №')
-  return detail // Неизвестный диагностический идентификатор сохраняется без изменения.
-}
-function stepStatus(status: string): string {
-  return ({ ok: 'ГОТОВО', cached: 'ИЗ КЕША', retry: 'ПОВТОР', error: 'ОШИБКА' } as Record<string, string>)[status] ?? status
-}
-function provenanceValue(key: string, value: string | number | null): string {
-  if (value === null) return 'Не указано'
-  if (typeof value === 'number') return decimal.format(value)
-  const labels: Record<string, string> = {
-    live: 'текущий прогноз', fixture: 'демонстрационный', verified: 'проверено',
-    response_received: 'по времени получения ответа', none: 'нет',
-  }
-  return ['provenance_status', 'availability_basis', 'interpolation'].includes(key) ? labels[value] ?? value : value
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof TypeError) return 'Не удалось связаться с сервером. Проверьте подключение и повторите попытку.'
   if (error instanceof Error) return error.message
-  return 'Не удалось выполнить запрос. Повторите попытку.'
-}
-
-function PowerChart({ hours }: { hours: ForecastHour[] }) {
-  const width = 940, height = 265, left = 42, right = 12, top = 12, bottom = 31
-  const x = (i: number) => left + i * (width - left - right) / Math.max(1, hours.length - 1)
-  const y = (v: number) => top + (1 - v) * (height - top - bottom)
-  const line = (key: 'power_norm' | 'baseline_norm') => hours.map((h, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(h[key]).toFixed(1)}`).join(' ')
-  return <div className="chart-wrap" role="img" aria-label="Почасовой прогноз нормализованной мощности и базовая модель">
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-      {[0, .25, .5, .75, 1].map(v => <g key={v}><line className="grid-line" x1={left} x2={width - right} y1={y(v)} y2={y(v)} /><text className="axis-label" x={left - 9} y={y(v) + 4} textAnchor="end">{Math.round(v * 100)}</text></g>)}
-      <path className="baseline-line" d={line('baseline_norm')} />
-      <path className="power-line" d={line('power_norm')} />
-      {[0, Math.floor((hours.length - 1) / 2), hours.length - 1].map(i => <text key={i} className="axis-label" x={x(i)} y={height - 5} textAnchor={i === 0 ? 'start' : i === hours.length - 1 ? 'end' : 'middle'}>{localTime(hours[i].valid_at)}</text>)}
-    </svg>
-  </div>
-}
-
-function coordinateLabel(status: string): string {
-  return status === 'organizer-supplied' ? 'Координаты предоставлены организаторами' : 'Условные координаты'
-}
-
-function SiteMap({ sites, selected, onSelect }: { sites: Site[], selected: string, onSelect: (id: string) => void }) {
-  const center: [number, number] = sites.length ? [sites.reduce((sum, s) => sum + s.latitude, 0) / sites.length, sites.reduce((sum, s) => sum + s.longitude, 0) / sites.length] : [0, 0]
-  const selectedSite = sites.find(s => s.turbine_id === selected)
-  return <div className="map-frame">
-    <MapContainer center={center} zoom={12} scrollWheelZoom={false} className="site-map" key={sites.map(s => `${s.turbine_id}-${s.latitude}-${s.longitude}`).join('-')}>
-      <TileLayer attribution='&copy; участники <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {sites.map(site => <CircleMarker key={site.turbine_id} center={[site.latitude, site.longitude]} radius={selected === site.turbine_id ? 13 : 11} pathOptions={{ color: selected === site.turbine_id ? '#184f45' : '#fff', fillColor: selected === site.turbine_id ? '#b4e86a' : '#266f62', fillOpacity: 1, weight: 3 }} eventHandlers={{ click: () => onSelect(site.turbine_id) }}>
-        <Tooltip direction="top" offset={[0, -14]}>{site.turbine_id} · {coordinateLabel(site.coordinate_status)}</Tooltip>
-        <Popup>{site.turbine_id} · {coordinateLabel(site.coordinate_status)}</Popup>
-      </CircleMarker>)}
-    </MapContainer>
-    <span className="map-badge">{selectedSite ? coordinateLabel(selectedSite.coordinate_status) : 'Загрузка координат…'}</span>
-  </div>
+  return ru.requestFailed
 }
 
 function Comparison({ current, previous }: { current: ForecastResult, previous: ForecastResult | null }) {
@@ -117,14 +33,26 @@ function Comparison({ current, previous }: { current: ForecastResult, previous: 
   if (!overlap.length) return null
   const mean = overlap.reduce((sum, row) => sum + Math.abs(row.power_norm - prior.get(row.valid_at)!.power_norm), 0) / overlap.length
   const changed = overlap.filter(row => Math.abs(row.power_norm - prior.get(row.valid_at)!.power_norm) > 1e-12).length
-  return <section className="panel comparison"><div className="section-title"><span className="eyebrow">СРАВНЕНИЕ ЗАПУСКОВ</span><h3>Что изменилось?</h3></div>
-    <p>Изменилось {changed} из {overlap.length} общих часов. Среднее абсолютное изменение нормализованной мощности: <strong>{pct(mean)}</strong>.</p>
-    <details><summary>Показать общие часы</summary><div className="table-scroll"><table><thead><tr><th>Местное время</th><th>Ранее</th><th>Сейчас</th><th>Разница</th></tr></thead><tbody>{overlap.map(row => <tr key={row.valid_at}><td>{localTime(row.valid_at)}</td><td>{pct(prior.get(row.valid_at)!.power_norm)}</td><td>{pct(row.power_norm)}</td><td>{decimal.format((row.power_norm - prior.get(row.valid_at)!.power_norm) * 100)} п. п.</td></tr>)}</tbody></table></div></details>
+  return <section className="panel comparison"><div className="section-title"><span className="eyebrow">{ru.comparison}</span><h3>{ru.whatChanged}</h3></div>
+    <p>{changed} из {overlap.length} {ru.overlapping} <strong>{percent(mean)}</strong> {ru.units}.</p>
+    <details><summary>{ru.inspectOverlap}</summary><div className="table-scroll"><table><thead><tr><th>{ru.localHour}</th><th>{ru.previous}</th><th>{ru.current}</th><th>{ru.change}</th></tr></thead><tbody>{overlap.map(row => <tr key={row.valid_at}><td>{localTime(row.valid_at, current.timezone)}</td><td>{percent(prior.get(row.valid_at)!.power_norm)}</td><td>{percent(row.power_norm)}</td><td>{signedPoints(row.power_norm - prior.get(row.valid_at)!.power_norm)}</td></tr>)}</tbody></table></div></details>
   </section>
 }
 
+function AnswerContent({ answer }: { answer: QuestionAnswer }) {
+  return <>
+    <p className="prose">{answer.text}</p>
+    {answer.tool_results?.filter(result => result.table && result.table.columns.length > 0).map((result, index) => <div className="table-scroll chat-table" key={`${result.tool}-${index}`}>
+      <table><caption>{ru.calculationTable}</caption><thead><tr>{result.table!.columns.map((column, i) => <th scope="col" key={i}>{column}</th>)}</tr></thead>
+        <tbody>{result.table!.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody>
+      </table>
+    </div>)}
+    {answer.warning && <p className="message-warning">{answer.warning}</p>}
+  </>
+}
+
 export default function App() {
-  const [mode, setMode] = useState<WeatherMode>('fixture')
+  const [mode, setMode] = useState<WeatherMode>('live')
   const [sites, setSites] = useState<Site[]>([])
   const [siteId, setSiteId] = useState('')
   const [date, setDate] = useState(FIRST_DATE)
@@ -137,13 +65,17 @@ export default function App() {
   const [explanationError, setExplanationError] = useState('')
   const [loading, setLoading] = useState(false)
   const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState<Explanation | null>(null)
+  const [conversation, setConversation] = useState<{ question: string, answer: QuestionAnswer }[]>([])
+  const [pendingQuestion, setPendingQuestion] = useState('')
   const [questionError, setQuestionError] = useState('')
+  const [downloadError, setDownloadError] = useState('')
   const [asking, setAsking] = useState(false)
   const requestEpoch = useRef(0)
   const questionEpoch = useRef(0)
   const forecastController = useRef<AbortController | null>(null)
   const answerController = useRef<AbortController | null>(null)
+  const conversationId = useRef<string | null>(null)
+  const askingNow = useRef(false)
   const lastSuccess = useRef<ForecastResult | null>(null)
 
   function invalidate() {
@@ -151,17 +83,20 @@ export default function App() {
     questionEpoch.current += 1
     forecastController.current?.abort()
     answerController.current?.abort()
-    setResult(null); setPrevious(null); setExplanation(null); setAnswer(null); setQuestion('')
-    setError(''); setExplanationError(''); setQuestionError(''); setLoading(false); setAsking(false)
+    conversationId.current = null
+    askingNow.current = false
+    setResult(null); setPrevious(null); setExplanation(null); setConversation([]); setQuestion(''); setPendingQuestion('')
+    setError(''); setExplanationError(''); setQuestionError(''); setDownloadError(''); setLoading(false); setAsking(false)
   }
 
   useEffect(() => {
     const controller = new AbortController()
     setSites([]); setSiteId(''); setSiteError('')
     getSites(mode, controller.signal).then(loaded => {
+      if (controller.signal.aborted) return
       setSites(loaded)
       if (loaded.length) setSiteId(loaded[0].turbine_id)
-      else setSiteError('Нет зарегистрированных турбин для выбранного режима.')
+      else setSiteError(mode === 'archive' ? ru.noArchiveSites : ru.noSites)
     }).catch(err => { if (!controller.signal.aborted) setSiteError(errorMessage(err)) })
     return () => controller.abort()
   }, [mode])
@@ -177,15 +112,15 @@ export default function App() {
     try {
       const forecast = await createForecast(input, controller.signal)
       if (epoch !== requestEpoch.current) return
-      if (forecast.status !== 'ok' || !forecast.forecast_id || !forecast.model_input || !forecast.hours?.length) throw new Error('Ответ прогноза неполный.')
-      setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id && lastSuccess.current.mode === forecast.mode ? lastSuccess.current : null)
+      if (forecast.status !== 'ok' || !forecast.forecast_id || !forecast.model_input || !forecast.hours?.length) throw new Error(ru.incompleteForecast)
+      setPrevious(lastSuccess.current?.turbine_id === forecast.turbine_id ? lastSuccess.current : null)
       lastSuccess.current = forecast
       setResult(forecast)
       setLoading(false)
       try {
         const prose = await explainForecast(forecast.forecast_id, controller.signal)
         if (epoch === requestEpoch.current) {
-          if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error('Объяснение не соответствует этому прогнозу.')
+          if (prose.forecast_fingerprint !== forecast.fingerprint) throw new Error(ru.staleExplanation)
           setExplanation(prose)
         }
       } catch (err) {
@@ -198,22 +133,48 @@ export default function App() {
 
   async function submitQuestion(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!result || !question.trim()) return
-    answerController.current?.abort()
+    if (!result || !question.trim() || askingNow.current) return
+    askingNow.current = true
     const controller = new AbortController()
     answerController.current = controller
     const epoch = requestEpoch.current
-    const answerEpoch = ++questionEpoch.current
-    setAnswer(null); setQuestionError(''); setAsking(true)
+    const submitted = question.trim()
+    setPendingQuestion(submitted); setQuestion(''); setQuestionError(''); setAsking(true)
     try {
-      const response = await askQuestion(result.forecast_id, question.trim(), controller.signal)
-      if (epoch === requestEpoch.current && answerEpoch === questionEpoch.current && !controller.signal.aborted) {
-        if (response.forecast_fingerprint !== result.fingerprint) throw new Error('Ответ не соответствует этому прогнозу.')
-        setAnswer(response)
+      const response = await askQuestion(result.forecast_id, submitted, conversationId.current ?? undefined, controller.signal)
+      if (epoch === requestEpoch.current && !controller.signal.aborted) {
+        if (response.forecast_fingerprint !== result.fingerprint) throw new Error(ru.staleAnswer)
+        if (!response.conversation_id || (conversationId.current && response.conversation_id !== conversationId.current)) throw new Error(ru.invalidServerResponse)
+        conversationId.current = response.conversation_id
+        setConversation(current => [...current, { question: submitted, answer: response }])
+        setPendingQuestion('')
       }
     } catch (err) {
-      if (epoch === requestEpoch.current && answerEpoch === questionEpoch.current && !controller.signal.aborted) setQuestionError(errorMessage(err))
-    } finally { if (epoch === requestEpoch.current && answerEpoch === questionEpoch.current && !controller.signal.aborted) setAsking(false) }
+      if (epoch === requestEpoch.current && !controller.signal.aborted) {
+        if (err instanceof ApiFailure && err.code === 'CONVERSATION_NOT_FOUND') {
+          conversationId.current = null
+          setConversation([])
+          setQuestionError(ru.newConversation)
+        } else setQuestionError(errorMessage(err))
+        setPendingQuestion(''); setQuestion(submitted)
+      }
+    } finally {
+      if (epoch === requestEpoch.current && !controller.signal.aborted) { askingNow.current = false; setAsking(false) }
+    }
+  }
+
+  async function saveCsv(kind: 'forecast' | 'model-input') {
+    if (!result) return
+    const active = result
+    const epoch = requestEpoch.current
+    setDownloadError('')
+    try {
+      const blob = await downloadCsv(active.forecast_id, kind)
+      if (epoch !== requestEpoch.current) return
+      saveBlob(blob, kind === 'model-input' ? active.model_input.filename : `forecast-${active.turbine_id}-${active.origin.slice(0, 10)}-${active.horizon_hours}h.csv`)
+    } catch (err) {
+      if (epoch === requestEpoch.current) setDownloadError(errorMessage(err))
+    }
   }
 
   const selectedSite = sites.find(s => s.turbine_id === siteId)
@@ -221,41 +182,76 @@ export default function App() {
   const mean = result ? result.hours.reduce((sum, row) => sum + row.power_norm, 0) / result.hours.length : 0
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">◒</span><span>AEOLUS <small>LAB</small></span></div><div className="topbar-right"><span className="topbar-line" /><span>{mode === 'live' ? 'ПРОГНОЗ НА БУДУЩЕЕ' : 'ИСТОРИЧЕСКИЙ СЦЕНАРИЙ'}</span><span className="topbar-dot" /> ЛОКАЛЬНОЕ ДЕМО</div></header>
-    <main>
-      <div className="hero"><div><span className="eyebrow hero-kicker">ПРОГНОЗ ЭНЕРГИИ ВЕТРА / 01</span><h1>Мощность <em>в прогнозе.</em></h1><p>{mode === 'live' ? 'Реальная прогнозная погода Open-Meteo проходит через входной CSV и модель турбины. Это прогноз, а не измеренная погода.' : 'Изучайте почасовые прогнозы по истории турбин и выбранному источнику погоды.'}</p></div><div className="hero-side"><span className="hero-orbit">✳</span><span>ПОЧАСОВОЙ<br />ПРОГНОЗ</span></div></div>
-      <div className="notice"><span className="notice-icon">i</span><span>{mode === 'fixture' ? 'Демонстрационная погода и условные координаты.' : mode === 'live' ? 'Текущий прогноз погоды Open-Meteo, не измерения и не подтверждённый исторический архив. Координаты предоставлены организаторами.' : 'Архивная погода допускается только при подтверждении доступности на историческую дату. Координаты предоставлены организаторами.'} Модели обучены на измерениях турбин. Мощность нормализована [0, 1], не МВт или МВт·ч.</span></div>
-      <div className="workspace"><section className="panel setup-panel"><div className="section-title"><span className="eyebrow">01 / НАСТРОЙКА</span><h2>Выберите прогноз</h2><p>{mode === 'live' ? 'Выберите турбину и горизонт текущего прогноза.' : 'Выберите турбину и дату исторического сценария.'}</p></div>
-        <div className="field-label">ЗАРЕГИСТРИРОВАННАЯ ТУРБИНА</div>
-        <SiteMap sites={sites} selected={siteId} onSelect={id => { if (id !== siteId) { invalidate(); setSiteId(id) } }} />
-        <div className="field-note">{selectedSite ? `${coordinateLabel(selectedSite.coordinate_status)}. Маркеры выбирают только зарегистрированные турбины; совпадение с инженерным расположением не подтверждено.` : 'Маркеры доступны после загрузки зарегистрированных турбин.'}</div>
-        <label className="field"><span>Турбина</span><select aria-label="Турбина" value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">Выберите турбину</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id} · {coordinateLabel(site.coordinate_status)}</option>)}</select></label>
-        {siteError && <div className="error-banner" role="alert">{siteError}</div>}
-        <label className="field"><span>Источник погоды</span><select aria-label="Источник погоды" value={mode} onChange={e => { invalidate(); lastSuccess.current = null; setSites([]); setSiteId(''); setSiteError(''); setMode(e.target.value as WeatherMode) }}><option value="fixture">Демонстрационная погода (заглушка)</option><option value="live">Реальный прогноз Open-Meteo (сейчас)</option><option value="archive">Проверенный исторический архив</option></select></label>
-        <div className="field-grid">{mode !== 'live' && <label className="field"><span>Дата исторического прогноза</span><input aria-label="Дата исторического прогноза" type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>}<label className="field"><span>Горизонт</span><select aria-label="Горизонт" value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>24 часа</option><option value={48}>48 часов</option></select></label></div>
-        <div className="origin-note">{mode === 'live' ? 'Начало прогноза назначит сервер: следующий полный час UTC после получения запроса.' : `Начало исторического прогноза: 23:00 (${selectedSite?.timezone || LOCAL_ZONE}) · ${origin} UTC`}</div>
-        <button className="primary-button" disabled={!siteId || (mode !== 'live' && !date) || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? 'Формируем прогноз…' : 'Сформировать прогноз'} <span>↗</span></button>
-        {error && <div className="error-banner" role="alert">{error}</div>}
-      </section>
-      <section className="results-column"><div className="pipeline"><span>ПОГОДА</span><b>→</b><span>CSV</span><b>→</b><span>МОДЕЛЬ</span><b>→</b><span>ОБЪЯСНЕНИЕ</span></div>
-        {!result && <div className="panel empty-state"><div className="empty-glyph">∿</div><span className="eyebrow">ОЖИДАНИЕ ПРОГНОЗА</span><h2>Почасовая мощность турбины</h2><p>Выберите турбину и сформируйте прогноз, чтобы увидеть график, погоду, входной CSV модели и объяснение.</p></div>}
-        {result && <><section className="panel result-panel"><div className="result-heading"><div><span className="eyebrow">02 / РЕЗУЛЬТАТ ПРОГНОЗА</span><h2>Прогноз турбины {result.turbine_id}</h2><p>Начало: {localTime(result.origin)} ({result.timezone}) · {result.horizon_hours} ч · {result.mode === 'live' ? 'реальный прогноз погоды Open-Meteo' : result.mode === 'fixture' ? 'демонстрационная погода' : 'проверенный исторический прогноз'}</p></div><span className="status-pill">● ГОТОВО</span></div>
-          {result.mode === 'live' && <div className="live-weather-note"><strong>Реальная прогнозная погода Open-Meteo</strong> · доступна на момент: {result.weather_provenance.available_at ? `${localTime(result.weather_provenance.available_at)} (${result.timezone})` : 'время не указано'} · ветер на высоте 10 м — прокси для неизвестной высоты датчика турбины, не измеренная погода. Почасовые прогнозные ветер и температура показаны в таблице ниже. Данные погоды: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo, CC BY 4.0 ↗</a>.</div>}
-          <div className="metrics"><div><span>СРЕДНЯЯ МОЩНОСТЬ</span><strong>{pct(mean)}</strong><small>нормализованная мощность</small></div><div><span>МАКСИМУМ</span><strong>{pct(result.analysis.peak_power_norm)}</strong><small>{localTime(result.analysis.peak_at)} местное время</small></div><div><span>МИНИМУМ</span><strong>{pct(result.analysis.min_power_norm)}</strong><small>{localTime(result.analysis.min_at)} местное время</small></div></div>
-          <div className="chart-header"><h3>Почасовой прогноз мощности</h3><div className="legend"><span><i className="legend-forecast" /> Прогноз</span><span><i className="legend-baseline" /> Базовая модель</span></div></div><PowerChart hours={result.hours} />
-          <div className="actions"><a href={downloadUrl(result.forecast_id, 'forecast')} download>↓ Скачать прогноз CSV</a><a href={downloadUrl(result.forecast_id, 'model-input')} download>↓ Скачать входной CSV модели</a></div>
-          <div className="model-input"><span className="eyebrow">ВХОДНОЙ CSV МОДЕЛИ / {result.model_input.schema_version}</span><div><strong>{result.model_input.filename}</strong><span>{result.model_input.row_count} строк · {result.model_input.columns.join(', ')}</span></div><code>{result.model_input.sha256}</code></div>
+    <header className="page-header">
+      <div><h1>{ru.pageTitle}</h1><p>{ru.pageSubtitle}</p></div>
+      <span className="mode-badge"><i />{mode === 'live' ? ru.live : mode === 'fixture' ? ru.fixture : ru.archive}</span>
+    </header>
+    <main className="workspace">
+      <aside className="setup-column" aria-label={ru.selectForecast}>
+        <section className="panel setup-panel">
+          <div className="section-title"><h2>{ru.selectForecast}</h2></div>
+          <SiteMap sites={sites} selected={siteId} onSelect={id => { if (id !== siteId) { invalidate(); setSiteId(id) } }} />
+          <label className="field"><span>{ru.turbine}</span><select aria-label={ru.turbine} value={siteId} onChange={e => { invalidate(); setSiteId(e.target.value) }} disabled={!sites.length}><option value="">{ru.chooseTurbine}</option>{sites.map(site => <option key={site.turbine_id} value={site.turbine_id}>{site.turbine_id}</option>)}</select></label>
+          {selectedSite && <div className="site-meta"><span>{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.latitude)} · {new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 6 }).format(selectedSite.longitude)}</span><small>{coordinateLabel(selectedSite.coordinate_status)}</small>{selectedSite.coordinate_source && <a href={selectedSite.coordinate_source} target="_blank" rel="noreferrer">{ru.openMap} ↗</a>}</div>}
+          {siteError && <div className="error-banner" role="alert">{siteError}</div>}
+          <div className="field-grid">
+            {mode !== 'live' && <label className="field"><span>{ru.originDate}</span><input aria-label={ru.originDate} type="date" min={FIRST_DATE} value={date} onChange={e => { invalidate(); setDate(e.target.value) }} /></label>}
+            <label className="field"><span>{ru.horizon}</span><select aria-label={ru.horizon} value={horizon} onChange={e => { invalidate(); setHorizon(Number(e.target.value) as 24 | 48) }}><option value={24}>{ru.hours24}</option><option value={48}>{ru.hours48}</option></select></label>
+          </div>
+          <label className="field"><span>{ru.weatherSource}</span><select aria-label={ru.weatherSource} value={mode} onChange={e => { invalidate(); setMode(e.target.value as WeatherMode) }}><option value="live">{ru.live}</option><option value="fixture">{ru.fixture}</option><option value="archive">{ru.archive}</option></select></label>
+          <p className="origin-note">{mode === 'live' ? ru.liveTime : date ? localTime(origin, selectedSite?.timezone || LOCAL_ZONE) : ru.chooseDate}</p>
+          <button className="primary-button" disabled={!siteId || !date || loading} onClick={() => runForecast({ siteId, date, horizon, mode })}>{loading ? ru.calculating : ru.predict}</button>
+          {error && <div className="error-banner" role="alert">{error}</div>}
         </section>
-        <section className="panel analysis-panel"><div className="section-title"><span className="eyebrow">03 / АНАЛИЗ</span><h3>Что показывает прогноз</h3></div>{explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `Объяснение ИИ${explanation.model ? ` · ${explanation.model}` : ''}` : 'Расчётное объяснение — ИИ недоступен'}</div>{explanation.warning && <div className="warning-banner">{explanation.warning}</div>}</> : explanationError ? <div className="warning-banner" role="alert">Объяснение недоступно: {explanationError}</div> : <p className="muted">Готовим объяснение…</p>}
-          {result.analysis.warnings.length > 0 && <div className="analysis-warnings">{result.analysis.warnings.map(warning => <span key={warning}>• {warning}</span>)}</div>}
-          <form className="question-form" onSubmit={submitQuestion}><label htmlFor="forecast-question">Задать вопрос по этому прогнозу</label><div><input id="forecast-question" value={question} onChange={e => { questionEpoch.current += 1; answerController.current?.abort(); setQuestion(e.target.value); setAnswer(null); setQuestionError(''); setAsking(false) }} placeholder="В какие шесть часов средняя мощность максимальна?" maxLength={500} /><button disabled={asking || !question.trim()}>{asking ? 'Ищем ответ…' : 'Задать вопрос ↗'}</button></div></form>
-          {answer && <div className="answer"><span className="eyebrow">ОТВЕТ · {answer.backend === 'llm' ? 'ИИ' : 'РАСЧЁТНЫЙ ОТВЕТ'}</span><p>{answer.text}</p>{answer.warning && <div className="warning-banner">{answer.warning}</div>}</div>}{questionError && <div className="error-banner" role="alert">{questionError}</div>}
-        </section>
-        <Comparison current={result} previous={previous} />
-        <section className="panel detail-panel"><details open={result.mode === 'live' ? true : undefined}><summary>Почасовые данные <span>{result.hours.length} строк</span></summary><div className="table-scroll"><table><thead><tr><th>Местное время</th><th>Час</th><th>Прогноз ветра, м/с</th><th>Прогноз температуры, °C</th><th>Мощность</th><th>Базовая модель</th></tr></thead><tbody>{result.hours.map(hour => <tr key={hour.valid_at}><td>{localTime(hour.valid_at)}</td><td>{hour.lead_hour}</td><td>{decimal.format(hour.wind_speed_ms)}</td><td>{decimal.format(hour.temperature_c)}</td><td>{pct(hour.power_norm)}</td><td>{pct(hour.baseline_norm)}</td></tr>)}</tbody></table></div></details><details><summary>Происхождение данных и этапы расчёта <span>{result.trace.length} этапов</span></summary><div className="provenance"><div><strong>Запуск погоды</strong><span>{result.run_id}</span></div><div><strong>Модель</strong><span>{result.model_id}</span></div><div><strong>Конец периода обучения</strong><span>{result.train_last_interval_start} UTC</span></div><div><strong>Ответ из кеша</strong><span>{result.cache_hit ? 'Да' : 'Нет'}</span></div>{Object.entries(result.weather_provenance).map(([key, value]) => <div key={key}><strong>{provenanceLabels[key] ?? key}</strong><span>{provenanceValue(key, value)}</span></div>)}</div><ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{stepStatus(step.status)}</span><strong>{stepLabels[step.step] ?? step.step}</strong><small>{stepDetail(step.detail)}</small></li>)}</ol></details></section>
-        {mode !== 'live' && <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>Перейти на день вперёд и пересчитать <span>→</span></button>}
+        <p className="scope-note">{mode === 'live' ? ru.liveNotice : ru.notice}</p>
+      </aside>
+      <div className="results-column">
+        {!result && <section className="panel empty-state" aria-live="polite"><div className="empty-chart" aria-hidden="true"><svg viewBox="0 0 200 60"><path d="M0 50 L28 40 L55 47 L82 18 L108 28 L138 8 L166 22 L200 3" /></svg></div><h2>{loading ? ru.calculating : ru.emptyTitle}</h2><p>{loading ? ru.loadingHint : ru.emptyText}</p></section>}
+        {result && <>
+          <section className="panel result-panel">
+            <div className="result-heading"><div><h2>{ru.resultTitle}</h2><p>{result.turbine_id} · {result.horizon_hours} ч · {provenanceLabel(String(result.weather_provenance.provenance_status ?? ''))}</p></div><button type="button" className="secondary-button" onClick={() => saveCsv('forecast')}>{ru.downloadForecast}</button></div>
+            <div className="metrics">
+              <div><span>{ru.meanPower}</span><strong>{percent(mean)}</strong><small>{ru.normalized}</small></div>
+              <div><span>{ru.peakPower}</span><strong>{percent(result.analysis.peak_power_norm)}</strong><small>{localTime(result.analysis.peak_at, result.timezone)}</small></div>
+              <div><span>{ru.lowestPower}</span><strong>{percent(result.analysis.min_power_norm)}</strong><small>{localTime(result.analysis.min_at, result.timezone)}</small></div>
+            </div>
+            <PowerChart key={result.forecast_id} result={result} />
+            {downloadError && <div className="error-banner" role="alert">{downloadError}</div>}
+          </section>
+          <section className="panel analysis-panel" aria-labelledby="analysis-heading">
+            <div className="section-title"><h2 id="analysis-heading">{ru.analysisTitle}</h2><p>{ru.chatHint}</p></div>
+            <div className="chat-messages" aria-live="polite" aria-relevant="additions text">
+              <div className="chat-message assistant-message">
+                <span className="message-author">{ru.analysisAuthor}</span>
+                {explanation ? <><p className="prose">{explanation.text}</p><div className="explanation-meta">{explanation.backend === 'llm' ? `${ru.aiExplanation}${explanation.model ? ` · ${explanation.model}` : ''}` : ru.computedExplanation}</div>{explanation.warning && <p className="message-warning">{explanation.warning}</p>}</> : explanationError ? <div className="error-banner">{ru.explanationUnavailable}: {explanationError}</div> : <p className="muted loading-status" role="status">{ru.explanationLoading}</p>}
+              </div>
+              {conversation.map((exchange, index) => <div className="chat-exchange" key={index}>
+                <div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{exchange.question}</p></div>
+                <div className="chat-message assistant-message"><span className="message-author">{exchange.answer.backend === 'llm' ? ru.aiExplanation : ru.computed}</span><AnswerContent answer={exchange.answer} /></div>
+              </div>)}
+              {pendingQuestion && <><div className="chat-message user-message"><span className="message-author">{ru.you}</span><p>{pendingQuestion}</p></div><p className="muted loading-status" role="status">{ru.asking}</p></>}
+            </div>
+            <form className="question-form" onSubmit={submitQuestion}>
+              <label htmlFor="forecast-question">{ru.askLabel}</label>
+              <textarea id="forecast-question" value={question} onChange={e => { setQuestionError(''); setQuestion(e.target.value) }} placeholder={ru.askPlaceholder} maxLength={500} rows={2} />
+              <div className="question-actions"><span>{ru.questionHint}</span><button className="primary-button" disabled={asking || !question.trim()}>{asking ? ru.asking : ru.ask}</button></div>
+            </form>
+            {questionError && <div className="error-banner" role="alert">{questionError}</div>}
+          </section>
+          <Comparison current={result} previous={previous} />
+          <section className="panel detail-panel">
+            <details><summary>{ru.hourlyData} <span>{result.hours.length} {ru.rows}</span></summary><div className="table-scroll"><table><thead><tr><th>{ru.localHour}</th><th>{ru.lead}</th><th>{ru.wind}</th><th>{ru.temperature}</th><th>{ru.power}</th></tr></thead><tbody>{result.hours.map(hour => <tr key={hour.valid_at}><td>{localTime(hour.valid_at, result.timezone)}</td><td>{hour.lead_hour}</td><td>{decimal(hour.wind_speed_ms)}</td><td>{decimal(hour.temperature_c)}</td><td>{percent(hour.power_norm)}</td></tr>)}</tbody></table></div></details>
+            <details><summary>{ru.technicalDetails}</summary>
+              <div className="model-input"><div><h3>{ru.modelInput}</h3><button type="button" className="secondary-button" onClick={() => saveCsv('model-input')}>{ru.downloadInput}</button></div><p>{result.model_input.row_count} {ru.rows} · {result.model_input.schema_version}</p><code>{result.model_input.columns.join(', ')}</code><p className="file-hash">SHA-256: {result.model_input.sha256}</p></div>
+              {result.analysis.warnings.length > 0 && <ul className="analysis-warnings">{result.analysis.warnings.map(warning => <li key={warning}>{warningLabel(warning)}</li>)}</ul>}
+              <div className="provenance"><div><strong>{ru.weatherRun}</strong><span>{result.run_id}</span></div><div><strong>{ru.model}</strong><span>{result.model_id}</span></div><div><strong>{ru.trainingCutoff}</strong><span>{localTime(result.train_last_interval_start, result.timezone)}</span></div><div><strong>{ru.cached}</strong><span>{result.cache_hit ? ru.yes : ru.no}</span></div>{Object.entries(result.weather_provenance).map(([key, value]) => <div key={key}><strong>{fieldLabel(key)}</strong><span>{provenanceValue(key, value === null ? 'Не указано' : String(value), result.timezone)}</span></div>)}</div>
+              <ol className="trace">{result.trace.map((step, i) => <li key={`${step.step}-${i}`}><span className={step.status === 'ok' || step.status === 'cached' ? 'trace-ok' : ''}>{statusLabel(step.status)}</span><strong>{stepLabel(step.step)}</strong><small>{traceDetail(step.step, step.detail)}</small></li>)}</ol>
+            </details>
+          </section>
+          {mode !== 'live' && <button className="advance-button" onClick={() => { const advanced = nextDate(date); setDate(advanced); runForecast({ siteId, date: advanced, horizon, mode }) }}>{ru.advance} →</button>}
         </>}
-      </section></div>
-    </main><footer><span>AEOLUS LAB / {mode === 'live' ? 'ТЕКУЩИЙ ПРОГНОЗ' : 'ИСТОРИЧЕСКИЙ СЦЕНАРИЙ'}</span><span>ИЗМЕРЕНИЯ ТУРБИН · {mode === 'fixture' ? 'ДЕМОНСТРАЦИОННАЯ ПОГОДА' : mode === 'live' ? 'ПРОГНОЗ OPEN-METEO' : 'ПРОВЕРЕННЫЙ АРХИВ'} · НОРМАЛИЗОВАННАЯ МОЩНОСТЬ</span></footer>
+      </div>
+    </main>
+    <footer>{ru.footer} · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Погода: Open-Meteo (CC BY 4.0)</a></footer>
   </div>
 }
