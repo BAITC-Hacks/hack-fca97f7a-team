@@ -2,6 +2,10 @@
 
 Implementation backlog for three developers: [tasks.md](tasks.md). The demo must
 be fully in Russian; localization is tracked there as required remaining work.
+For source hashes, excluded hours, feature units, model evaluation and remaining
+data assumptions, see [DATA_MODEL_HANDOFF.md](DATA_MODEL_HANDOFF.md) and
+[EVALUATION_REPORT.md](EVALUATION_REPORT.md). The module
+interfaces are defined in [CONTRACTS.md](CONTRACTS.md).
 
 The active application is a React frontend with a FastAPI backend:
 
@@ -14,7 +18,7 @@ key/provider is unavailable. Streamlit (`app.py`) is only the legacy prototype.
 
 ## Run the app
 
-Requires Python **3.12+** (tested 3.14.4) and Node **22+**.
+Requires Python **3.12+** (integration tested on 3.14.7) and Node **22+**.
 
 ```sh
 python -m venv .venv
@@ -110,6 +114,9 @@ Assume ten-minute interval starts in Asia/Almaty. Drop/report ambiguous local
 times and incomplete hours. Each retained hour averages six complete samples.
 Zero-power observations are retained. Generated data/audits are under ignored
 `data/canonical/`; models and inference CSVs are under ignored `artifacts/`.
+The audit records source hashes, ambiguous clock rows and missing ten-minute
+slots; the measured wind height is still unknown. The current synthetic weather
+does not supply a verified wind height, so no height conversion is applied.
 
 | Turbine | Complete hourly observations | Frozen training hours |
 |---|---:|---:|
@@ -122,7 +129,8 @@ for the next origin; February labels/observed weather cannot enter the predictor
 
 Power is normalized [0,1], displayed as percentages in React—not MW/MWh. Capacity,
 normalization denominator and source timestamp convention still need confirmation.
-No farm total, calibrated uncertainty or accuracy claim without held-out truth.
+No farm total, calibrated uncertainty or end-to-end forecast accuracy claim
+without as-issued weather and matching held-out truth.
 Map coordinates `(0,0)` / `(0,0.03)` are intentionally fictional.
 
 ## Validation
@@ -132,7 +140,15 @@ python -m pytest -q
 npm --prefix frontend run build
 ```
 
-**41 Python tests pass** and the React TypeScript/Vite build passes. Tests cover
+For a reproducible chronological diagnostic using measured wind and temperature,
+run `python -m scripts.evaluate`. Its MAE/RMSE/R² and baseline comparison are in
+[EVALUATION_REPORT.md](EVALUATION_REPORT.md). These scores do not measure a
+forecast using as-issued weather; the real provider and February truth are absent.
+
+The merged integration passed **49 Python tests** and the React TypeScript/Vite
+build. An isolated training run reproduced the original T1/T2 model IDs, and
+eight offline FastAPI forecasts covered both turbines, both fixture origins and
+both horizons while downloading the exact model-input CSV. The Python suite covers
 CSV consumption/integrity, chronology, source identities, input/output validation,
 cache, HTTP/downloads, stored forecast context, summary fallback and legacy UI.
 Tests clear OPENAI_API_KEY and mock SDK responses; they spend no API credits.
@@ -149,6 +165,7 @@ and the JavaScript error check (none).
 - Resolve actual turbine coordinates and verify as-issued archived weather access.
 - Implement February replay over all 28 daily origins and both turbines.
 - Validate feature mismatch between measured training weather and forecast inputs.
+- Confirm measured and provider wind heights before attempting any height conversion.
 - Confirm timezone/interval/normalization metadata; score only if truth is supplied.
 
 The current app is a working demo with explicit weather/location stubs, not a
