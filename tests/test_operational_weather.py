@@ -107,3 +107,47 @@ def test_receipt_rejects_future_object_even_with_recomputed_checksum(tmp_path, m
     _write_receipt(tmp_path, data)
     with pytest.raises(ForecastError):
         weather._load_receipt(tmp_path, ORIGIN, horizon_hours=24)
+
+
+def test_packaged_points_avoid_decode_but_still_verify_raw(tmp_path, monkeypatch):
+    data = _mock_receipt(tmp_path, monkeypatch)
+    _write_receipt(tmp_path, data)
+    weather._DECODED_RECEIPTS.clear()
+    bundle = tmp_path / 'bundle'
+    receipts = bundle / 'weather_receipts'
+    receipts.mkdir(parents=True)
+    raw = (tmp_path / 'receipt.json').read_bytes()
+    (receipts / '20260131-00z.json').write_bytes(raw)
+    manifest = {'files': {'weather_receipts/20260131-00z.json': {
+        'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}}}
+    (bundle / 'bundle_manifest.json').write_text(json.dumps(manifest))
+    monkeypatch.setattr(weather, '_VERIFIED_BUNDLE', bundle)
+    def unexpected_decode(*args):
+        raise AssertionError('Audited release points should not be decoded again')
+    monkeypatch.setattr(weather, '_point', unexpected_decode)
+    assert weather._load_receipt(tmp_path, ORIGIN, horizon_hours=48,
+                                 allow_packaged_points=True) == data
+    assert not weather._DECODED_RECEIPTS  # Offline audit still performs full decoding.
+    (tmp_path / '18-10u.bin').write_bytes(b'x')
+    with pytest.raises(ForecastError):
+        weather._load_receipt(tmp_path, ORIGIN, horizon_hours=48,
+                              allow_packaged_points=True)
+
+
+def test_modified_packaged_receipt_is_not_trusted(tmp_path, monkeypatch):
+    data = _mock_receipt(tmp_path, monkeypatch)
+    _write_receipt(tmp_path, data)
+    bundle = tmp_path / 'bundle'
+    receipts = bundle / 'weather_receipts'
+    receipts.mkdir(parents=True)
+    raw = (tmp_path / 'receipt.json').read_bytes()
+    (bundle / 'bundle_manifest.json').write_text(json.dumps({'files': {
+        'weather_receipts/20260131-00z.json': {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}}}))
+    data['nodes']['18']['T1']['10u'] = 999
+    _write_receipt(tmp_path, data)
+    (receipts / '20260131-00z.json').write_bytes((tmp_path / 'receipt.json').read_bytes())
+    monkeypatch.setattr(weather, '_VERIFIED_BUNDLE', bundle)
+    assert not weather._matches_packaged_receipt(data, '20260131-00z')
+    with pytest.raises(ForecastError):
+        weather._load_receipt(tmp_path, ORIGIN, horizon_hours=48,
+                              allow_packaged_points=True)

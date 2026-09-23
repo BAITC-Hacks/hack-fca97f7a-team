@@ -447,3 +447,12 @@ The legacy `POST /api/forecasts` archive semantics are unchanged.
 The February UI sends `weather_source="verified"` unconditionally. There is no
 source selector. Restored conditional archive results are discarded; legacy
 provider-documented support remains only for explicit internal/CLI requests.
+
+Runtime February reads may reuse decoded grid points from the exact audited
+`deliverables/february_2026_operational/weather_receipts` artifact, matched to its
+bundle manifest SHA-256 and the complete local receipt. Raw GRIB/index bytes,
+object identities, offsets and availability are still verified on every request.
+Absent or changed packaged receipts require full GRIB decoding. Offline cache
+preparation keeps full decoding enabled. This avoids 102 repeated GRIB decodes
+on the first UI request for each date. Forecast requests have a 30-second UI
+limit and show a retryable Russian error instead of an indefinite loading state.

@@ -52,7 +52,7 @@ export const ru = {
   provenance: 'Происхождение данных и этапы расчёта', steps: 'этапов', weatherRun: 'Запуск погоды', model: 'Модель', modelProfile: 'Профиль модели', profileEcmwf: 'Модель по данным Open-Meteo ECMWF IFS, ветер 10 м', profileMeasured: 'Модель по измерениям турбины', trainingWeather: 'Погода при обучении', retrospectiveTrainingWeather: 'Ретроспективный прогноз погоды', forecastAccuracy: 'Точность прогноза подтверждена', notVerified: 'Нет, не проверена', notSpecified: 'Не указано', trainingCutoff: 'Конец обучения', cached: 'Результат из кеша', yes: 'Да', no: 'Нет',
   advance: 'Следующий день и новый прогноз', footer: 'Время указано в часовом поясе Asia/Almaty. Погода поступает из текущего прогноза Open-Meteo.',
   noSites: 'Нет доступных зарегистрированных турбин.', noArchiveSites: 'Список турбин для архивного режима недоступен.',
-  incompleteForecast: 'Ответ сервера не содержит полного прогноза.', staleExplanation: 'Объяснение относится к другому прогнозу.', staleAnswer: 'Ответ относится к другому прогнозу.', requestFailed: 'Не удалось завершить запрос.',
+  incompleteForecast: 'Ответ сервера не содержит полного прогноза.', forecastTimeout: 'Расчёт занял слишком много времени. Повторите запрос.', staleExplanation: 'Объяснение относится к другому прогнозу.', staleAnswer: 'Ответ относится к другому прогнозу.', requestFailed: 'Не удалось завершить запрос.',
   originAt: 'Прогноз выпущен в 23:00', local: 'местного времени', utc: 'UTC',
   overlapping: 'совпадающих часов изменились. Среднее абсолютное изменение:', units: 'нормализованной мощности',
   pp: 'п. п.',

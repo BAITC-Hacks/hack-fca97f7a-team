@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 
 from backend.adapters.weather import SITES
-from backend.core.contracts import FIRST_ORIGIN, ForecastError, artifact_dir, expected_hours, fingerprint, iso, utc_time
+from backend.core.contracts import FIRST_ORIGIN, ROOT, ForecastError, artifact_dir, expected_hours, fingerprint, iso, utc_time
 
 BASE = "https://storage.googleapis.com/ecmwf-open-data"
 DOC = "https://confluence.ecmwf.int/display/UDOC/ECMWF+open+data%3A+real-time+forecasts+from+IFS+and+AIFS"
@@ -28,6 +28,7 @@ STEPS = tuple(range(18, 67, 3))
 MAX_INDEX = 100_000
 MAX_FIELD = 4_000_000
 _DECODED_RECEIPTS: set[str] = set()
+_VERIFIED_BUNDLE = ROOT / "deliverables/february_2026_operational"
 
 
 def cache_dir() -> Path:
@@ -163,12 +164,35 @@ def _atomic_write(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _load_receipt(path: Path, origin: str, *, horizon_hours: int) -> dict:
+def _matches_packaged_receipt(data: dict, name: str) -> bool:
+    """Reuse decoded points only from the exact locally audited release artifact.
+
+    This bundle is trusted application data, like the shipped model. Runtime raw
+    hashes, object identity and chronology are still checked below on every call.
+    Missing/changed bundle artifacts fall back to decoding the source GRIB.
+    """
+    try:
+        relative = f"weather_receipts/{name}.json"
+        manifest_path = _VERIFIED_BUNDLE / "bundle_manifest.json"
+        receipt_path = _VERIFIED_BUNDLE / relative
+        if manifest_path.is_symlink() or receipt_path.is_symlink():
+            return False
+        manifest = json.loads(manifest_path.read_bytes())
+        raw = receipt_path.read_bytes()
+        entry = manifest["files"][relative]
+        return (len(raw) == entry["bytes"] and _sha(raw) == entry["sha256"]
+                and json.loads(raw) == data)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _load_receipt(path: Path, origin: str, *, horizon_hours: int,
+                  allow_packaged_points: bool = False) -> dict:
     if path.is_symlink() or (path / "receipt.json").is_symlink():
         raise ForecastError("WEATHER_UNAVAILABLE", "Кэш ECMWF содержит недопустимую ссылку.")
     try:
         data = json.loads((path / "receipt.json").read_text(encoding="utf-8"))
-        when, init, prefix, _ = _run(origin)
+        when, init, prefix, name = _run(origin)
         if data.get("version") != 1 or data.get("origin") != origin or data.get("run_id") != iso(init):
             raise ValueError("wrong receipt identity")
         if set(data.get("nodes", {})) != {str(step) for step in STEPS}:
@@ -179,6 +203,8 @@ def _load_receipt(path: Path, origin: str, *, horizon_hours: int) -> dict:
             raise ValueError("incomplete objects")
         receipt_hash = data.get("receipt_sha256")
         decode_points = receipt_hash not in _DECODED_RECEIPTS
+        if decode_points and allow_packaged_points and _matches_packaged_receipt(data, str(name)):
+            decode_points = False
         for step in STEPS:
             stem = BASE + "/" + prefix + f"{step}h-oper-fc"
             index_meta = data["objects"][f"{step}-index"]
@@ -217,7 +243,8 @@ def _load_receipt(path: Path, origin: str, *, horizon_hours: int) -> dict:
                 values = node[turbine_id]
                 if not all(math.isfinite(values[key]) for key in ("2t", "10u", "10v", "grid_latitude", "grid_longitude")):
                     raise ValueError("invalid numeric node")
-        _DECODED_RECEIPTS.add(receipt_hash)
+        if decode_points:
+            _DECODED_RECEIPTS.add(receipt_hash)
         if len(_DECODED_RECEIPTS) > 64:
             _DECODED_RECEIPTS.pop()
         return data
@@ -230,7 +257,8 @@ def fetch_operational_weather(site: dict, origin: str, horizon_hours: int, mode:
     if mode != "archive" or site not in SITES or type(horizon_hours) is not int or horizon_hours not in (24, 48):
         raise ForecastError("INVALID_INPUT", "Неверный запрос к операционному архиву ECMWF.")
     when, init, prefix, name = _run(origin)
-    receipt = _load_receipt(cache_dir() / name, origin, horizon_hours=horizon_hours)
+    receipt = _load_receipt(cache_dir() / name, origin, horizon_hours=horizon_hours,
+                            allow_packaged_points=True)
     nodes = receipt["nodes"]
     rows = []
     for lead, stamp in enumerate(expected_hours(origin, horizon_hours), 1):
