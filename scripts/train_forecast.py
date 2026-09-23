@@ -83,7 +83,7 @@ def comparison(history, joined, tid, start, end, recipe, context):
         raise ForecastError("DATA_INVALID", "Покрытие проверочного периода ниже 90%.")
     cutoff = stamp(start).isoformat()
     fitted = train_model(joined, cutoff, tid, profile=PROFILE, recipe=recipe, weather_context=context)
-    legacy = train_model(history, cutoff, tid)
+    legacy = train_model(history, cutoff, tid, variant="baseline")
     rows = test[FEATURES].to_dict("records")
     raw = _raw_predictions(fitted, rows)
     test["prediction"] = np.clip(raw, 0, 1)

@@ -1,4 +1,4 @@
-"""Train once from supplied history, never during a Streamlit rerun."""
+"""Обучить модели на исходной истории вне HTTP-запросов."""
 import argparse
 import json
 from pathlib import Path
@@ -7,13 +7,14 @@ import pandas as pd
 
 from contracts import FIRST_ORIGIN, FEATURES, SITE_IDS, ForecastError, artifact_dir
 from data import ingest_all, save_canonical
-from model import save_model, train_model, predict_power
+from model import DEFAULT_VARIANT, MODEL_VARIANTS, save_model, train_model, predict_power
 
 
-def _diagnose(history: pd.DataFrame, turbine_id: str, output_dir: Path) -> dict:
+def _diagnose(history: pd.DataFrame, turbine_id: str, output_dir: Path,
+              *, variant: str = DEFAULT_VARIANT) -> dict:
     """Strict temporal holdout, using measured weather; not an NWP backtest."""
     validation_start = "2026-01-01T00:00:00Z"
-    model = train_model(history, validation_start, turbine_id)
+    model = train_model(history, validation_start, turbine_id, variant=variant)
     selected = history.loc[
         (history.turbine_id == turbine_id)
         & (history.timestamp >= pd.Timestamp(validation_start))
@@ -27,6 +28,9 @@ def _diagnose(history: pd.DataFrame, turbine_id: str, output_dir: Path) -> dict:
     errors = predicted - truth
     report = {
         "kind": "chronological_measured_weather_diagnostic",
+        "model_variant": variant,
+        "implementation": model.metadata["implementation"],
+        "parameters": model.metadata["parameters"],
         "weather_input": "observed_same_hour_wind_and_temperature",
         "not_a_historical_weather_forecast_backtest": True,
         "validation_start": validation_start,
@@ -59,8 +63,10 @@ def _diagnose(history: pd.DataFrame, turbine_id: str, output_dir: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["fixture", "archive"], default="fixture",
-                        help="Weather mode; training always uses real supplied history.")
-    parser.add_argument("--skip-validation", action="store_true")
+                        help="Режим погоды; обучение всегда использует реальные измерения турбин.")
+    parser.add_argument("--variant", choices=MODEL_VARIANTS, default=DEFAULT_VARIANT,
+                        help="candidate — настройка MAE; baseline — исходная модель для сравнения.")
+    parser.add_argument("--skip-validation", action="store_true", help="Пропустить январскую диагностику.")
     args = parser.parse_args()
     history, audits = ingest_all()
     if {audit["turbine_id"] for audit in audits} != set(SITE_IDS):
@@ -71,15 +77,16 @@ def main() -> None:
     report_dir = artifact_dir() / "training"
     report_dir.mkdir(parents=True, exist_ok=True)
     for audit in audits:
-        diagnostic = None if args.skip_validation else _diagnose(history, audit["turbine_id"], report_dir)
-        fitted = train_model(history, FIRST_ORIGIN, audit["turbine_id"])
+        diagnostic = None if args.skip_validation else _diagnose(
+            history, audit["turbine_id"], report_dir, variant=args.variant)
+        fitted = train_model(history, FIRST_ORIGIN, audit["turbine_id"], variant=args.variant)
         fitted.metadata["source_sha256"] = audit["source_sha256"]
         fitted.metadata["validation"] = diagnostic
         if diagnostic is not None:
             (report_dir / f"{audit['turbine_id']}_metrics.json").write_text(json.dumps(diagnostic, indent=2))
         save_model(fitted)
-        print(f"{audit['turbine_id']}: {fitted.metadata['training_rows']} training hours; "
-              f"last interval {fitted.metadata['train_last_interval_start']}; {fitted.metadata['model_id'][:23]}")
+        print(f"{audit['turbine_id']} ({args.variant}): {fitted.metadata['training_rows']} часов обучения; "
+              f"последний интервал {fitted.metadata['train_last_interval_start']}; {fitted.metadata['model_id'][:23]}")
 
 
 if __name__ == "__main__":

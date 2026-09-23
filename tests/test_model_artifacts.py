@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import pickle
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from contracts import ForecastError
-from model import load_model, predict_power, predict_with_diagnostics, save_model, train_model
+from model import MODEL_VARIANTS, load_model, predict_power, predict_with_diagnostics, save_model, train_model
 
 
 def history() -> pd.DataFrame:
@@ -23,15 +26,16 @@ def history() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_completed_hour_cutoff_and_frozen_origin():
+@pytest.mark.parametrize("variant", MODEL_VARIANTS)
+def test_completed_hour_cutoff_and_frozen_origin(variant):
     frame = history()
-    first = train_model(frame, "2026-01-31T18:00:00Z", "T1")
-    later = train_model(frame, "2026-02-03T18:00:00Z", "T1")
+    first = train_model(frame, "2026-01-31T18:00:00Z", "T1", variant=variant)
+    later = train_model(frame, "2026-02-03T18:00:00Z", "T1", variant=variant)
     assert first.metadata["train_last_interval_start"] == "2026-01-31T17:00:00Z"
     assert first.metadata["training_rows"] == 90
     assert first.metadata["model_id"] == later.metadata["model_id"]
     assert first.metadata["baseline_interval_start"] == "2026-01-31T17:00:00Z"
-    earlier = train_model(frame, "2026-01-31T17:00:00Z", "T1")
+    earlier = train_model(frame, "2026-01-31T17:00:00Z", "T1", variant=variant)
     assert earlier.metadata["training_rows"] == 89
     assert earlier.metadata["model_id"] != first.metadata["model_id"]
 
@@ -62,14 +66,68 @@ def test_prediction_validation_and_bounds():
             predict_power(bundle, bad)
 
 
-def test_artifact_round_trip_and_corruption(tmp_path):
-    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T2")
+@pytest.mark.parametrize("variant", MODEL_VARIANTS)
+def test_artifact_round_trip_and_corruption(tmp_path, variant):
+    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T2", variant=variant)
     path = save_model(bundle, tmp_path)
     loaded = load_model(path)
     rows = [{"wind_speed_ms": 9.0, "temperature_c": -2.0}]
     assert predict_power(loaded, rows) == predict_power(bundle, rows)
     assert loaded.metadata["model_id"] == bundle.metadata["model_id"]
+    assert loaded.metadata["parameters"] == bundle.metadata["parameters"]
+    assert loaded.metadata["params"] == bundle.metadata["parameters"]
     (path / "model.pkl").write_bytes(b"corrupt")
+    with pytest.raises(ForecastError) as error:
+        load_model(path)
+    assert error.value.code == "MODEL_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("field", ("implementation", "parameters"))
+def test_unknown_metadata_configuration_rejected_even_with_recomputed_identity(tmp_path, field):
+    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T2")
+    path = save_model(bundle, tmp_path)
+    metadata_path = path / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if field == "implementation":
+        metadata[field] = "hourly-hgbr-v3"
+    else:
+        metadata[field]["learning_rate"] = 0.05
+        metadata["params"] = metadata[field].copy()
+    identity = {
+        "implementation": metadata["implementation"],
+        "turbine_id": metadata["turbine_id"],
+        "cutoff": metadata["train_cutoff"],
+        "canonical_sha256": metadata["canonical_sha256"],
+        "feature_names": metadata["feature_names"],
+        "parameters": metadata["parameters"],
+        "python_version": metadata["python_version"],
+        "library_versions": metadata["library_versions"],
+    }
+    digest = sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    metadata["model_id"] = f"sha256:{digest}"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    tampered_path = path.rename(path.parent / digest)
+    with pytest.raises(ForecastError) as error:
+        load_model(tampered_path)
+    assert error.value.code == "MODEL_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("variant", MODEL_VARIANTS)
+def test_estimator_configuration_rejected_even_with_updated_checksum(tmp_path, variant):
+    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T2", variant=variant)
+    path = save_model(bundle, tmp_path)
+    model_path = path / "model.pkl"
+    estimator = pickle.loads(model_path.read_bytes())
+    if variant == "baseline":
+        estimator.set_params(early_stopping=False)
+    else:
+        estimator.set_params(loss="squared_error")
+    binary = pickle.dumps(estimator, protocol=pickle.HIGHEST_PROTOCOL)
+    model_path.write_bytes(binary)
+    metadata_path = path / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["artifact_sha256"] = sha256(binary).hexdigest()
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     with pytest.raises(ForecastError) as error:
         load_model(path)
     assert error.value.code == "MODEL_UNAVAILABLE"
@@ -97,9 +155,8 @@ def test_invalid_training_rows_fail():
 
 
 def test_registry_load_by_turbine_and_legacy_compatibility(tmp_path, monkeypatch):
-    import pickle
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path))
-    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T1")
+    bundle = train_model(history(), "2026-01-31T18:00:00Z", "T1", variant="baseline")
     directory = tmp_path / "models"
     directory.mkdir()
     (directory / "T1.pkl").write_bytes(pickle.dumps(bundle))
