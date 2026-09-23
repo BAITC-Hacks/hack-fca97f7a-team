@@ -1,9 +1,9 @@
-> Current scope: make February 2026 historical replay the primary React demo.
-> The latest user explicitly requires February dates and historical weather in UI;
-> earlier live-only restrictions are superseded. Keep live as a separate option.
-> Provider-documented Single Runs require explicit opt-in, inferred availability
-> shown in UI, and available_at=null. Never promote them to verified as-issued
-> evidence; preserve the default strict archive gate. See docs/february-replay.md.
+> Current scope: February 2026 replay is the primary Samal (React) demo.
+> Earlier live-only restrictions are superseded. Keep live separately.
+> Prefer verified operational ECMWF Open Data from the official public archive;
+> check each object's server timestamp before origin, GRIB identity and hashes.
+> Provider-documented Single Runs remain explicit conditional opt-in only,
+> available_at=null, never promoted to verified. See docs/february-replay.md.
 
 # Working agreement
 
@@ -27,11 +27,13 @@ the three developers, with ownership, priorities and acceptance criteria.
 
 1. React selects a registered turbine, February forecast date and 24/48-hour horizon.
    Historical dates map server-side to the preceding local day at 23:00 (18:00 UTC).
+   The primary historical request selects weather_source=operational.
    Conditional replay explicitly selects weather_source=provider-documented.
    Live remains a separate mode with the current UTC hour as origin.
 2. `backend/api.py` validates HTTP bodies and calls `agent.run_forecast`.
 3. Weather adapters normalize output into hourly wind m/s and temperature °C.
-   Historical replay reads checked Single Runs from `replay_weather.py`; live and
+   Historical replay reads checked operational ECMWF archive data; conditional
+   Single Runs remain separate in `replay_weather.py`. Live and
    strict verified archive use `backend/adapters/weather.py`.
 4. `backend/ml/model_input.py` writes canonical CSV to `artifacts/model_inputs/<sha256>.csv`.
 5. `model.predict_power_csv` reads and validates that exact file before inference.
@@ -72,8 +74,9 @@ the retrospective training protocol and its unverified 24/48-hour skill. Coordin
 and mapped by the user through Google Maps; retain `coordinate_status=user_provided`
 and the source links (see CONTRACTS.md). OpenAI is a real adapter; missing
 keys/failure must be labeled fallback.
-Do not claim full organizer compliance from coverage alone: historical archive
-availability remains conditional until its provenance is substantiated.
+Report archive provenance and full-period coverage from the actual run report.
+Operational archive checks establish availability separately from forecast accuracy;
+conditional Single Runs must retain their unverified availability status.
 
 ## Ownership and how to make changes
 

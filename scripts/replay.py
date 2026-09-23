@@ -50,6 +50,7 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
             return run_forecast(request, weather_tool=fetch_operational_weather)
     output_dir = Path(output_dir)
     rows, runs, failures = [], [], []
+    frozen_models = {}
     for day in range(days):
         origin = iso(utc_time(FIRST_ORIGIN) + timedelta(days=day))
         for turbine in SITE_IDS:
@@ -60,6 +61,9 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
                     failures.append({**request, "code": result.get("code", "INTERNAL_ERROR"),
                                      "message": result.get("message", "Прогноз недоступен")})
                     continue
+                if turbine in frozen_models and frozen_models[turbine] != result.get("model_id"):
+                    raise ValueError("Active model changed during the frozen replay")
+                frozen_models[turbine] = result.get("model_id")
                 expected = expected_hours(origin, 48)
                 provenance = result["weather_provenance"]
                 expected_status = "provider_documented" if documented else ("verified" if mode == "archive" else "fixture")
@@ -119,7 +123,7 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
     report = {"status": "ok" if complete else "incomplete", "mode": mode,
               "full_february_replay": submission_ready, "truth_scored": False,
               "test_period": {"start_local": "2026-02-01T00:00:00+05:00", "end_exclusive_local": "2026-03-01T00:00:00+05:00", "timezone": "Asia/Almaty"},
-              "training_cutoff": FIRST_ORIGIN,
+              "training_cutoff": FIRST_ORIGIN, "frozen_models": frozen_models,
               "issue_policy": "previous_local_day_23:00; targets origin+1h..48h",
               "complete_forecast_coverage": complete and days == 28,
               "weather_source": weather_source if mode == "archive" else "fixture",
@@ -130,6 +134,12 @@ def run_replay(output_dir: Path, *, mode: str = "archive", days: int = 28,
               "output_file": filename, "daily_output_file": daily_filename, "daily_rows": len(daily_rows), "runs": runs, "failures": failures,
               "limitations": ["Февральские метрики не рассчитаны: фактическая выработка отсутствует.",
                                "Формат итоговой сдачи должен быть сверён с требованиями организаторов."]}
+    if weather_source == "operational" and mode == "archive":
+        report["limitations"].extend([
+            "ECMWF IFS: ближайшая ячейка сетки 0,25°, линейная интерполяция компонент ветра и температуры с 3-часового шага на часовой.",
+            "Last-Modified подтверждает время архивной копии до origin, а не точное время первой публикации ECMWF.",
+            "Обучение использовало подготовку погоды Open-Meteo; отличие от нативной сетки ECMWF может влиять на точность.",
+            "T1/T2 находятся в одной погодной ячейке; модели мощности обучены отдельно."])
     if documented:
         report["limitations"].extend([
             "Каждый выпуск получен из Single Runs API, а не фактической погоды; документация также использует термин hindcasts.",

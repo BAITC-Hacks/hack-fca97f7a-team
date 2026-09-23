@@ -152,7 +152,7 @@ def run_forecast(request: dict, *, weather_tool=fetch_weather, model_loader=None
         trace.append({"step": "load_model", "status": "ok", "detail": metadata["model_id"]})
         provenance = {key: manifest[key] for key in ("run_id", "provider", "source_url", "initialized_at",
                      "available_at", "availability_basis", "provenance_status", "raw_sha256", "interpolation")}
-        provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256", "grid_resolution_degrees", "native_step_hours", "evidence", "source_kind") if key in manifest})
+        provenance.update({key: manifest[key] for key in ("assumed_available_by", "availability_verified", "provider_documentation", "run_policy", "retrieved_at", "weather_cache_hit", "wind_height_m", "temperature_height_m", "weather_model", "wind_height_status", "grid_latitude", "grid_longitude", "forecast_sha256", "grid_resolution_degrees", "native_step_hours", "source_step_hours", "object_count", "receipt_sha256", "evidence", "source_kind") if key in manifest})
         model_context = {key: copy.deepcopy(metadata[key]) for key in (
             "turbine_id", "model_id", "estimator", "feature_names", "features", "feature_units",
             "training_source", "training_rows", "train_cutoff", "train_origin",
